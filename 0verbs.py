@@ -17,6 +17,7 @@
 # MA 02110-1301, USA.
 #
 # The program is python2 and python3 compatibile
+import argparse
 import os
 import platform
 import re
@@ -47,32 +48,45 @@ ARCH_NAMES = {
 class PackageFinder(object):
 
     def __init__(self):
+        parser = argparse.ArgumentParser(
+            description='Search the OpenBSD package list from a local database.')
+        parser.add_argument('query', nargs='?', help='package name to search for')
+        parser.add_argument('--update', action='store_true', help='re-download the package database')
+        args = parser.parse_args()
+
         the_list = os.path.join(os.path.expanduser('~'), '.package_list')
 
-        if not os.path.isfile(the_list):
-            ftp_url = 'https://ftp.openbsd.org/pub/OpenBSD/{release}/packages/{arch}/SHA256'\
-            .format(release=self.release(), arch=self.arch())
+        if args.update or not os.path.isfile(the_list):
+            self.download(the_list)
+        elif args.query is None:
+            sys.exit('ERROR: Please supply some package!')
 
-            print('Creating a small local database from all {0} packages'\
-            .format(ftp_url))
+        if args.query is not None:
+            self.search(the_list, args.query)
 
-            all_packages = urlopen(ftp_url, timeout=120).read().decode('utf-8')
+    def download(self, the_list):
+        release, arch = self.release(), self.arch()
+        ftp_url = 'https://ftp.openbsd.org/pub/OpenBSD/{release}/packages/{arch}/SHA256'\
+        .format(release=release, arch=arch)
 
-            with open(the_list, 'wt') as z:
-                z.write(all_packages)
-            print('You are ready to perform local package search,'
-                ' database saved in {0}'.format(the_list))
-        else:
-            if len(sys.argv) < 2:
-                sys.exit('ERROR: Please supply some package!')
-            query = sys.argv[1]
-            with open(the_list, 'rt') as read_packs:
-                for x in read_packs.readlines():
-                    current_line = ''.join(re.findall(r'\([^()]*\)', x))\
-                    .replace('(', '').replace(')', '')
-                    if query in current_line:
-                        found_match, _ = os.path.splitext(current_line)
-                        print(found_match)
+        print('Creating a small local database from all {0} packages'\
+        .format(ftp_url))
+
+        all_packages = urlopen(ftp_url, timeout=120).read().decode('utf-8')
+
+        with open(the_list, 'wt') as z:
+            z.write(all_packages)
+        print('You are ready to perform local package search,'
+            ' database saved in {0}'.format(the_list))
+
+    def search(self, the_list, query):
+        with open(the_list, 'rt') as read_packs:
+            for x in read_packs:
+                current_line = ''.join(re.findall(r'\([^()]*\)', x))\
+                .replace('(', '').replace(')', '')
+                if query in current_line:
+                    found_match, _ = os.path.splitext(current_line)
+                    print(found_match)
 
     def release(self):
         if os.getenv('OPENBSD_RELEASE'):
