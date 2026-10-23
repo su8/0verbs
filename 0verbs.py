@@ -24,6 +24,7 @@ import sys
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
+DATABASE = os.path.join(os.path.expanduser('~'), '.package_list')
 DEFAULT_RELEASE = '8.0'
 
 # platform.machine() names (Linux, macOS and OpenBSD's `uname -m`)
@@ -42,63 +43,49 @@ ARCH_NAMES = {
     'mips64': 'mips64',
 }
 
-class PackageFinder:
+def package_list_url():
+    release = os.getenv('OPENBSD_RELEASE') or (
+        platform.release() if platform.system() == 'OpenBSD' else DEFAULT_RELEASE)
+    machine = platform.machine().lower()
+    arch = os.getenv('OPENBSD_ARCH') or ARCH_NAMES.get(machine, machine)
+    return f'https://ftp.openbsd.org/pub/OpenBSD/{release}/packages/{arch}/SHA256'
 
-    def __init__(self):
-        parser = argparse.ArgumentParser(
-            description='Search the OpenBSD package list from a local database.')
-        parser.add_argument('query', nargs='?', help='package name to search for (case-insensitive)')
-        parser.add_argument('--update', action='store_true', help='re-download the package database')
-        args = parser.parse_args()
+def download():
+    url = package_list_url()
+    print(f'Creating a small local database from all {url} packages')
+    try:
+        packages = urlopen(url, timeout=120).read().decode('utf-8')
+    except HTTPError as err:
+        sys.exit(f'ERROR: {err} for {url}\nSet OPENBSD_RELEASE and/or OPENBSD_ARCH'
+            ' to a release and architecture that exist on the mirror.')
+    with open(DATABASE, 'w') as db:
+        db.write(packages)
+    print(f'You are ready to perform local package search, database saved in {DATABASE}')
 
-        the_list = os.path.join(os.path.expanduser('~'), '.package_list')
+def search(query):
+    query = query.lower()
+    with open(DATABASE) as db:
+        for line in db:
+            current_line = ''.join(re.findall(r'\([^()]*\)', line))\
+            .replace('(', '').replace(')', '')
+            if query in current_line.lower():
+                found_match, _ = os.path.splitext(current_line)
+                print(found_match)
 
-        if args.update or not os.path.isfile(the_list):
-            self.download(the_list)
-        elif args.query is None:
-            sys.exit('ERROR: Please supply some package!')
+def main():
+    parser = argparse.ArgumentParser(
+        description='Search the OpenBSD package list from a local database.')
+    parser.add_argument('query', nargs='?', help='package name to search for (case-insensitive)')
+    parser.add_argument('--update', action='store_true', help='re-download the package database')
+    args = parser.parse_args()
 
-        if args.query is not None:
-            self.search(the_list, args.query)
+    if args.update or not os.path.isfile(DATABASE):
+        download()
+    elif args.query is None:
+        sys.exit('ERROR: Please supply some package!')
 
-    def download(self, the_list):
-        release, arch = self.release(), self.arch()
-        ftp_url = f'https://ftp.openbsd.org/pub/OpenBSD/{release}/packages/{arch}/SHA256'
-
-        print(f'Creating a small local database from all {ftp_url} packages')
-
-        try:
-            all_packages = urlopen(ftp_url, timeout=120).read().decode('utf-8')
-        except HTTPError as err:
-            sys.exit(f'ERROR: {err} for {ftp_url}\nSet OPENBSD_RELEASE and/or OPENBSD_ARCH'
-                ' to a release and architecture that exist on the mirror.')
-
-        with open(the_list, 'wt') as z:
-            z.write(all_packages)
-        print(f'You are ready to perform local package search, database saved in {the_list}')
-
-    def search(self, the_list, query):
-        query = query.lower()
-        with open(the_list, 'rt') as read_packs:
-            for x in read_packs:
-                current_line = ''.join(re.findall(r'\([^()]*\)', x))\
-                .replace('(', '').replace(')', '')
-                if query in current_line.lower():
-                    found_match, _ = os.path.splitext(current_line)
-                    print(found_match)
-
-    def release(self):
-        if os.getenv('OPENBSD_RELEASE'):
-            return os.getenv('OPENBSD_RELEASE')
-        if platform.system() == 'OpenBSD':
-            return platform.release()
-        return DEFAULT_RELEASE
-
-    def arch(self):
-        if os.getenv('OPENBSD_ARCH'):
-            return os.getenv('OPENBSD_ARCH')
-        machine = platform.machine().lower()
-        return ARCH_NAMES.get(machine, machine)
+    if args.query is not None:
+        search(args.query)
 
 if __name__ == '__main__':
-    PackageFinder()
+    main()
