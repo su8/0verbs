@@ -66,11 +66,10 @@ def search(query):
     query = query.lower()
     with open(DATABASE) as db:
         for line in db:
-            current_line = ''.join(re.findall(r'\([^()]*\)', line))\
-            .replace('(', '').replace(')', '')
-            if query in current_line.lower():
-                found_match, _ = os.path.splitext(current_line)
-                print(found_match)
+            # SHA256 (curl-8.22.0.tgz) = <hash>
+            match = re.search(r'\((.+)\.tgz\)', line)
+            if match and query in match.group(1).lower():
+                print(match.group(1))
 
 def main():
     parser = argparse.ArgumentParser(
