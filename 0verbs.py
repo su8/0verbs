@@ -50,7 +50,7 @@ class PackageFinder(object):
     def __init__(self):
         parser = argparse.ArgumentParser(
             description='Search the OpenBSD package list from a local database.')
-        parser.add_argument('query', nargs='?', help='package name to search for')
+        parser.add_argument('query', nargs='?', help='package name to search for (case-insensitive)')
         parser.add_argument('--update', action='store_true', help='re-download the package database')
         args = parser.parse_args()
 
@@ -80,11 +80,12 @@ class PackageFinder(object):
             ' database saved in {0}'.format(the_list))
 
     def search(self, the_list, query):
+        query = query.lower()
         with open(the_list, 'rt') as read_packs:
             for x in read_packs:
                 current_line = ''.join(re.findall(r'\([^()]*\)', x))\
                 .replace('(', '').replace(')', '')
-                if query in current_line:
+                if query in current_line.lower():
                     found_match, _ = os.path.splitext(current_line)
                     print(found_match)
 

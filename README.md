@@ -9,6 +9,9 @@ Download this fellow and run it with the package you want. The first run downloa
 ```bash
 python3 0verbs.py 'curl'
 
+# searches are case-insensitive
+python3 0verbs.py 'LibreOffice'
+
 # re-download the database (e.g. after upgrading OpenBSD)
 python3 0verbs.py --update
 
