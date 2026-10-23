@@ -16,17 +16,13 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 # MA 02110-1301, USA.
 #
-# The program is python2 and python3 compatibile
 import argparse
 import os
 import platform
 import re
 import sys
-try:
-    from urllib.request import urlopen
-    from urllib.error import HTTPError
-except ImportError:
-    from urllib2 import urlopen, HTTPError
+from urllib.error import HTTPError
+from urllib.request import urlopen
 
 DEFAULT_RELEASE = '8.0'
 
@@ -46,7 +42,7 @@ ARCH_NAMES = {
     'mips64': 'mips64',
 }
 
-class PackageFinder(object):
+class PackageFinder:
 
     def __init__(self):
         parser = argparse.ArgumentParser(
@@ -67,22 +63,19 @@ class PackageFinder(object):
 
     def download(self, the_list):
         release, arch = self.release(), self.arch()
-        ftp_url = 'https://ftp.openbsd.org/pub/OpenBSD/{release}/packages/{arch}/SHA256'\
-        .format(release=release, arch=arch)
+        ftp_url = f'https://ftp.openbsd.org/pub/OpenBSD/{release}/packages/{arch}/SHA256'
 
-        print('Creating a small local database from all {0} packages'\
-        .format(ftp_url))
+        print(f'Creating a small local database from all {ftp_url} packages')
 
         try:
             all_packages = urlopen(ftp_url, timeout=120).read().decode('utf-8')
         except HTTPError as err:
-            sys.exit('ERROR: {0} for {1}\nSet OPENBSD_RELEASE and/or OPENBSD_ARCH'
-                ' to a release and architecture that exist on the mirror.'.format(err, ftp_url))
+            sys.exit(f'ERROR: {err} for {ftp_url}\nSet OPENBSD_RELEASE and/or OPENBSD_ARCH'
+                ' to a release and architecture that exist on the mirror.')
 
         with open(the_list, 'wt') as z:
             z.write(all_packages)
-        print('You are ready to perform local package search,'
-            ' database saved in {0}'.format(the_list))
+        print(f'You are ready to perform local package search, database saved in {the_list}')
 
     def search(self, the_list, query):
         query = query.lower()
