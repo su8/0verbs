@@ -25,7 +25,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 DATABASE = os.path.join(os.path.expanduser('~'), '.package_list')
-DEFAULT_RELEASE = '8.0'
+MIRROR = 'https://ftp.openbsd.org/pub/OpenBSD'
 
 # platform.machine() names (Linux, macOS and OpenBSD's `uname -m`)
 # mapped to OpenBSD package architectures, i.e. what `machine -a` prints
@@ -43,22 +43,27 @@ ARCH_NAMES = {
     'mips64': 'mips64',
 }
 
-def package_list_url():
-    release = os.getenv('OPENBSD_RELEASE') or (
-        platform.release() if platform.system() == 'OpenBSD' else DEFAULT_RELEASE)
-    machine = platform.machine().lower()
-    arch = os.getenv('OPENBSD_ARCH') or ARCH_NAMES.get(machine, machine)
-    return f'https://ftp.openbsd.org/pub/OpenBSD/{release}/packages/{arch}/SHA256'
+def default_release():
+    # Packages only install on the release they were built for
+    if platform.system() == 'OpenBSD':
+        return platform.release()
+    listing = urlopen(f'{MIRROR}/', timeout=120).read().decode('utf-8')
+    releases = re.findall(r'href="(\d+\.\d+)/"', listing)
+    return max(releases, key=lambda release: tuple(map(int, release.split('.'))))
 
-def download():
-    url = package_list_url()
+def default_arch():
+    machine = platform.machine().lower()
+    return ARCH_NAMES.get(machine, machine)
+
+def download(release, arch):
+    url = f'{MIRROR}/{release or default_release()}/packages/{arch or default_arch()}/SHA256'
     print(f'Downloading {url} ...', end=' ', flush=True)
     try:
         packages = urlopen(url, timeout=120).read().decode('utf-8')
     except HTTPError as err:
         print()
-        sys.exit(f'ERROR: {err} for {url}\nSet OPENBSD_RELEASE and/or OPENBSD_ARCH'
-            ' to a release and architecture that exist on the mirror.')
+        sys.exit(f'ERROR: {err} for {url}\nUse --release and/or --arch'
+            ' to pick a release and architecture that exist on the mirror.')
     with open(DATABASE, 'w') as db:
         db.write(packages)
     print(f'saved to {DATABASE}')
@@ -77,10 +82,14 @@ def main():
         description='Search the OpenBSD package list from a local database.')
     parser.add_argument('query', nargs='?', help='package name to search for (case-insensitive)')
     parser.add_argument('--update', action='store_true', help='re-download the package database')
+    parser.add_argument('--release', help='OpenBSD release to download, e.g. 7.8'
+        ' (default: the installed one on OpenBSD, otherwise the latest)')
+    parser.add_argument('--arch', help='package architecture to download, e.g. amd64'
+        ' (default: this machine\'s)')
     args = parser.parse_args()
 
-    if args.update or not os.path.isfile(DATABASE):
-        download()
+    if args.update or args.release or args.arch or not os.path.isfile(DATABASE):
+        download(args.release, args.arch)
     elif args.query is None:
         sys.exit('ERROR: Please supply some package!')
 
