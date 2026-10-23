@@ -52,15 +52,16 @@ def package_list_url():
 
 def download():
     url = package_list_url()
-    print(f'Creating a small local database from all {url} packages')
+    print(f'Downloading {url} ...', end=' ', flush=True)
     try:
         packages = urlopen(url, timeout=120).read().decode('utf-8')
     except HTTPError as err:
+        print()
         sys.exit(f'ERROR: {err} for {url}\nSet OPENBSD_RELEASE and/or OPENBSD_ARCH'
             ' to a release and architecture that exist on the mirror.')
     with open(DATABASE, 'w') as db:
         db.write(packages)
-    print(f'You are ready to perform local package search, database saved in {DATABASE}')
+    print(f'saved to {DATABASE}')
 
 def search(query):
     query = query.lower()
