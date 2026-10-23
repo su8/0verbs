@@ -24,8 +24,9 @@ import re
 import sys
 try:
     from urllib.request import urlopen
+    from urllib.error import HTTPError
 except ImportError:
-    from urllib2 import urlopen
+    from urllib2 import urlopen, HTTPError
 
 DEFAULT_RELEASE = '8.0'
 
@@ -72,7 +73,11 @@ class PackageFinder(object):
         print('Creating a small local database from all {0} packages'\
         .format(ftp_url))
 
-        all_packages = urlopen(ftp_url, timeout=120).read().decode('utf-8')
+        try:
+            all_packages = urlopen(ftp_url, timeout=120).read().decode('utf-8')
+        except HTTPError as err:
+            sys.exit('ERROR: {0} for {1}\nSet OPENBSD_RELEASE and/or OPENBSD_ARCH'
+                ' to a release and architecture that exist on the mirror.'.format(err, ftp_url))
 
         with open(the_list, 'wt') as z:
             z.write(all_packages)
