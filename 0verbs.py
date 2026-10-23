@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Copyright 10/23/2026 https://github.com/su8/0verbs
 # This program is free software; you can redistribute it and/or modify
@@ -16,51 +16,85 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 # MA 02110-1301, USA.
 #
-# The program is python2 and python3 compatibile
+import argparse
 import os
+import platform
 import re
 import sys
-from subprocess import check_output
-try:
-    from urllib.request import urlopen
-except ImportError:
-    from urllib import urlopen
+from urllib.error import HTTPError
+from urllib.request import urlopen
 
-class PackageFinder(object):
+DATABASE = os.path.join(os.path.expanduser('~'), '.package_list')
+MIRROR = 'https://ftp.openbsd.org/pub/OpenBSD'
 
-    def __init__(self):
-        the_list = os.path.join(os.getenv('HOME'), '.package_list')
+# platform.machine() names (Linux, macOS and OpenBSD's `uname -m`)
+# mapped to OpenBSD package architectures, i.e. what `machine -a` prints
+ARCH_NAMES = {
+    'x86_64': 'amd64', 'amd64': 'amd64',
+    'arm64': 'aarch64', 'aarch64': 'aarch64',
+    'i386': 'i386', 'i486': 'i386', 'i586': 'i386', 'i686': 'i386', 'x86': 'i386',
+    'armv7l': 'arm', 'armv7': 'arm',
+    'macppc': 'powerpc',
+    'octeon': 'mips64',
+    'loongson': 'mips64el',
+    'riscv64': 'riscv64',
+    'ppc64': 'powerpc64', 'powerpc64': 'powerpc64',
+    'sparc64': 'sparc64',
+    'mips64': 'mips64',
+}
 
-        if not os.path.isfile(the_list):
-            ftp_url = 'http://ftp.openbsd.org/pub/OpenBSD/{release}/packages/{arch}/SHA256'\
-            .format(release=self.spawN('uname', '-r'), arch=self.spawN('machine', '-a'))
+def default_release():
+    # Packages only install on the release they were built for
+    if platform.system() == 'OpenBSD':
+        return platform.release()
+    listing = urlopen(f'{MIRROR}/', timeout=120).read().decode('utf-8')
+    releases = re.findall(r'href="(\d+\.\d+)/"', listing)
+    return max(releases, key=lambda release: tuple(map(int, release.split('.'))))
 
-            print('Creating a small local database from all {0} packages'\
-            .format(ftp_url))
+def default_arch():
+    machine = platform.machine().lower()
+    return ARCH_NAMES.get(machine, machine)
 
-            all_packages = urlopen(ftp_url, timeout=120).read().decode('utf-8').split('\n')
+def download(release, arch):
+    url = f'{MIRROR}/{release or default_release()}/packages/{arch or default_arch()}/SHA256'
+    print(f'Downloading {url} ...', end=' ', flush=True)
+    try:
+        packages = urlopen(url, timeout=120).read().decode('utf-8')
+    except HTTPError as err:
+        print()
+        sys.exit(f'ERROR: {err} for {url}\nUse --release and/or --arch'
+            ' to pick a release and architecture that exist on the mirror.')
+    with open(DATABASE, 'w') as db:
+        db.write(packages)
+    print(f'saved to {DATABASE}')
 
-            package_as_txt = str()
-            for current_package in all_packages:
-                package_as_txt += current_package + '\n'
-            with open(the_list, 'wt') as z:
-                z.write(package_as_txt)
-            print('You are ready to perform local package search,'
-                ' database saved in {0}'.format(the_list))
-        else:
-            if len(sys.argv) < 2:
-                sys.exit('ERROR: Please supply some package!')
-            query = sys.argv[1]
-            with open(the_list, 'rt') as read_packs:
-                for x in read_packs.readlines():
-                    current_line = ''.join(re.findall(r'\([^()]*\)', x))\
-                    .replace('(', '').replace(')', '')
-                    if query in current_line:
-                        found_match, _ = os.path.splitext(current_line)
-                        print(found_match)
+def search(query):
+    query = query.lower()
+    with open(DATABASE) as db:
+        for line in db:
+            # SHA256 (curl-8.22.0.tgz) = <hash>
+            match = re.search(r'\((.+)\.tgz\)', line)
+            if match and query in match.group(1).lower():
+                print(match.group(1))
 
-    def spawN(self, *arg):
-        return check_output([arg[0], arg[1]]).decode('utf-8').replace('\n', '')
+def main():
+    parser = argparse.ArgumentParser(
+        description='Search the OpenBSD package list from a local database.')
+    parser.add_argument('query', nargs='?', help='package name to search for (case-insensitive)')
+    parser.add_argument('--update', action='store_true', help='re-download the package database')
+    parser.add_argument('--release', help='OpenBSD release to download, e.g. 7.8'
+        ' (default: the installed one on OpenBSD, otherwise the latest)')
+    parser.add_argument('--arch', help='package architecture to download, e.g. amd64'
+        ' (default: this machine\'s)')
+    args = parser.parse_args()
+
+    if args.update or args.release or args.arch or not os.path.isfile(DATABASE):
+        download(args.release, args.arch)
+    elif args.query is None:
+        sys.exit('ERROR: Please supply some package!')
+
+    if args.query is not None:
+        search(args.query)
 
 if __name__ == '__main__':
-    PackageFinder()
+    main()
