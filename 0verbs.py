@@ -112,13 +112,14 @@ def main():
     parser.add_argument('SHA256', nargs='?', help='Show the SHA256 sum for the particular package search')
     args = parser.parse_args()
 
+    if args.list_releases:
+        default_release(list_releases_only=True)
+        sys.exit(0)
+
     if args.update or args.release or args.arch or not os.path.isfile(DATABASE):
         download(args.release, args.arch)
     elif args.SHA256:
         search(args.query, show_sha=True)
-        sys.exit(0)
-    elif args.list_releases:
-        default_release(list_releases_only=True)
         sys.exit(0)
     elif args.query is None:
         sys.exit('ERROR: Please supply some package!')
