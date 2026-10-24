@@ -45,11 +45,8 @@ ARCH_NAMES = {
 
 def default_release(list_only=False):
     # Packages only install on the release they were built for
-    if platform.system() == 'OpenBSD':
-        release = platform.release()
-        if list_only:
-            print(release)
-        return release
+    if platform.system() == 'OpenBSD' and list_only == False:
+        return platform.release()
     listing = urlopen(f'{MIRROR}/', timeout=120).read().decode('utf-8')
     releases = re.findall(r'href="(\d+\.\d+)/"', listing)
     if list_only:
