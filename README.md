@@ -2,9 +2,9 @@
 
 ### 0verbs
 
-Download (local .txt database) and search for a OpenBSD package. No need to use the package searching (or set `PKG_PATH`) as it takes too long to list and find your query and you are required to have internet up and running. The program is not making .txt database from local ports tree programs. It creates database for the pre-compiled binaries that you will use with `pkg_add` to install the particular program that you have searched with `0verbs`.
+Download (local copy of the mirror's package list) and search for a OpenBSD package. No need to use the package searching (or set `PKG_PATH`) as it takes too long to list and find your query and you are required to have internet up and running. The program is not making a database from local ports tree programs. It creates database for the pre-compiled binaries that you will use with `pkg_add` to install the particular program that you have searched with `0verbs`.
 
-Download this fellow and run it with the package you want. The first run downloads a small `.txt` database, then searches it:
+Download this fellow and run it with the package you want. The first run downloads the mirror's small `SHA256` package list, then searches it:
 
 ```bash
 python3 0verbs.py curl
@@ -12,10 +12,13 @@ python3 0verbs.py curl
 # searches are case-insensitive
 python3 0verbs.py LibreOffice
 
-# to list the package name and sha256 sum
-python3 0verbs.py curl SHA256
+# narrow the search with several words (a package must contain all of them)
+python3 0verbs.py php curl
 
-# re-download the database (e.g. after upgrading OpenBSD)
+# to list the package name and sha256 sum
+python3 0verbs.py --sha256 curl
+
+# re-download the package lists (e.g. after upgrading OpenBSD, or for new security updates)
 python3 0verbs.py --update
 
 # to list all of the available releases
@@ -34,6 +37,8 @@ Outside OpenBSD the script downloads the latest release and maps your CPU to the
 ```bash
 python3 0verbs.py --release 7.8 --arch amd64 'curl'
 ```
+
+Like `pkg_add`, the script also downloads `packages-stable`, where a release's security and bug-fix updates go, and labels those results `(stable)`, e.g. `curl-8.19.0 (stable)` next to `curl-8.16.0`. That list keeps growing, so the script reminds you to run `--update` once it is more than a week old. Each download is kept under `~/.cache/0verbs/<release>/<folder>/<arch>/SHA256`, the same path it has on the mirror, so switching between releases doesn't download again. Without `--release`/`--arch`, searches use the list you downloaded most recently (on OpenBSD, always the installed release). Older versions saved a single `~/.package_list`, which you can delete.
 
 ### Add it to your shell configuration file:
 
