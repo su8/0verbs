@@ -17,6 +17,7 @@
 # MA 02110-1301, USA.
 #
 import argparse
+import glob
 import os
 import platform
 import re
@@ -24,7 +25,8 @@ import sys
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
-DATABASE = os.path.join(os.path.expanduser('~'), '.package_list')
+# Each download is kept as <release>/packages/<arch>/SHA256, the same path as on the mirror
+CACHE = os.path.join(os.path.expanduser('~'), '.cache', '0verbs')
 INSTALLURL = '/etc/installurl'
 DEFAULT_MIRROR = 'https://cdn.openbsd.org/pub/OpenBSD'
 
@@ -90,16 +92,33 @@ def default_arch():
     machine = platform.machine().lower()
     return ARCH_NAMES.get(machine, machine)
 
-def download(release, arch):
-    url = f'{MIRROR}/{release or default_release()}/packages/{arch or default_arch()}/SHA256'
-    packages = fetch(url, announce=True)
-    with open(DATABASE, 'w') as db:
-        db.write(packages)
-    print(f'saved to {DATABASE}')
+def local_list(release, arch):
+    return os.path.join(CACHE, release, 'packages', arch, 'SHA256')
 
-def search(query, show_sha=False):
+def pick_list(release, arch, update):
+    # On OpenBSD the installed release is the only one pkg_add(1) can use;
+    # elsewhere prefer the newest downloaded list over asking the mirror
+    if release is None and not update and platform.system() != 'OpenBSD':
+        lists = sorted(glob.glob(local_list('*', arch or '*')), key=os.path.getmtime)
+        if lists:
+            cached_release, _, cached_arch, _ = os.path.relpath(lists[-1], CACHE).split(os.sep)
+            return cached_release, cached_arch
+    return release or default_release(), arch or default_arch()
+
+def download(release, arch):
+    url = f'{MIRROR}/{release}/packages/{arch}/SHA256'
+    database = local_list(release, arch)
+    packages = fetch(url, announce=True)
+    os.makedirs(os.path.dirname(database), exist_ok=True)
+    # Write a temporary file first so an interrupted run never leaves half a list
+    with open(f'{database}.tmp', 'w') as db:
+        db.write(packages)
+    os.replace(f'{database}.tmp', database)
+    print(f'saved to {database}')
+
+def search(database, query, show_sha=False):
     query = query.lower()
-    with open(DATABASE) as db:
+    with open(database) as db:
         for line in db:
             # SHA256 (curl-8.22.0.tgz) = <base64 hash>=
             # the hash group stops before the trailing '=' padding
@@ -112,15 +131,26 @@ def search(query, show_sha=False):
             else:
                 print(match.group(1))
 
+def name_matching(pattern, example):
+    # --release and --arch become cache directories, so allow only plain names
+    def check(value):
+        value = value.lower()
+        if not re.fullmatch(pattern, value):
+            raise argparse.ArgumentTypeError(f'{value!r} is not like {example}')
+        return value
+    return check
+
 def main():
     parser = argparse.ArgumentParser(
         description='Search the OpenBSD package list from a local database.')
     parser.add_argument('query', nargs='?', help='package name to search for (case-insensitive)')
-    parser.add_argument('--update', action='store_true', help='re-download the package database')
-    parser.add_argument('--release', help='OpenBSD release to download, e.g. 7.8'
-        ' (default: the installed one on OpenBSD, otherwise the latest)')
-    parser.add_argument('--arch', help='package architecture to download, e.g. amd64'
-        ' (default: this machine\'s)')
+    parser.add_argument('--update', action='store_true', help='re-download the package list')
+    parser.add_argument('--release', type=name_matching(r'\d+\.\d+|snapshots', '7.8 or snapshots'),
+        help='OpenBSD release to search, e.g. 7.8, downloaded if needed (default: the installed'
+        ' release on OpenBSD; elsewhere the newest downloaded list, or the latest release)')
+    parser.add_argument('--arch', type=name_matching(r'[a-z0-9]+', 'amd64'),
+        help='package architecture to search, e.g. amd64, downloaded if needed'
+        ' (default: this machine\'s, or the newest downloaded list\'s outside OpenBSD)')
     parser.add_argument('--list-releases', action='store_true', help='list available OpenBSD releases on the mirror')
     parser.add_argument('SHA256', nargs='?', help='Show the SHA256 sum for the particular package search')
     args = parser.parse_args()
@@ -129,16 +159,18 @@ def main():
         print(*mirror_releases(), sep='\n')
         return
 
-    if args.update or args.release or args.arch or not os.path.isfile(DATABASE):
-        download(args.release, args.arch)
+    target = pick_list(args.release, args.arch, args.update)
+    database = local_list(*target)
+    if args.update or not os.path.isfile(database):
+        download(*target)
     elif args.SHA256:
-        search(args.query, show_sha=True)
+        search(database, args.query, show_sha=True)
         sys.exit(0)
     elif args.query is None:
         sys.exit('ERROR: Please supply some package!')
 
     if args.query is not None:
-        search(args.query, show_sha=False)
+        search(database, args.query, show_sha=False)
 
 if __name__ == '__main__':
     main()
