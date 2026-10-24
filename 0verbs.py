@@ -22,11 +22,14 @@ import os
 import platform
 import re
 import sys
+import time
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
-# Each download is kept as <release>/packages/<arch>/SHA256, the same path as on the mirror
+# Each download is kept as <release>/<folder>/<arch>/SHA256, the same path as on the mirror
 CACHE = os.path.join(os.path.expanduser('~'), '.cache', '0verbs')
+# Like pkg_add(1), also look in packages-stable, where a release's updates go
+FOLDERS = ('packages', 'packages-stable')
 INSTALLURL = '/etc/installurl'
 DEFAULT_MIRROR = 'https://cdn.openbsd.org/pub/OpenBSD'
 
@@ -58,16 +61,18 @@ ARCH_NAMES = {
 }
 
 def version_order(name):
-    # Compare digit runs as numbers, so 10.0 sorts after 7.8
+    # Compare digit runs as numbers, so 10.0 sorts after 7.8 and curl-8.10.1 after curl-8.9.0
     return [int(part) if part.isdigit() else part for part in re.split(r'(\d+)', name)]
 
-def fetch(url, announce=False):
+def fetch(url, announce=False, missing_ok=False):
     if announce:
         print(f'Downloading {url} ...', end=' ', flush=True)
     try:
         with urlopen(url, timeout=120) as response:
             return response.read().decode('utf-8')
     except HTTPError as err:
+        if missing_ok and err.code == 404:
+            return ''
         error = f'ERROR: {err} for {url}'
         if err.code == 404:
             error += (f'\nUse --release and/or --arch to pick a release and architecture'
@@ -92,8 +97,8 @@ def default_arch():
     machine = platform.machine().lower()
     return ARCH_NAMES.get(machine, machine)
 
-def local_list(release, arch):
-    return os.path.join(CACHE, release, 'packages', arch, 'SHA256')
+def local_list(release, arch, folder='packages'):
+    return os.path.join(CACHE, release, folder, arch, 'SHA256')
 
 def pick_list(release, arch, update):
     # On OpenBSD the installed release is the only one pkg_add(1) can use;
@@ -105,31 +110,46 @@ def pick_list(release, arch, update):
             return cached_release, cached_arch
     return release or default_release(), arch or default_arch()
 
-def download(release, arch):
-    url = f'{MIRROR}/{release}/packages/{arch}/SHA256'
-    database = local_list(release, arch)
-    packages = fetch(url, announce=True)
+def download(release, arch, folder):
+    url = f'{MIRROR}/{release}/{folder}/{arch}/SHA256'
+    database = local_list(release, arch, folder)
+    # A release has no packages-stable until its first update
+    packages = fetch(url, announce=True, missing_ok=folder != 'packages')
     os.makedirs(os.path.dirname(database), exist_ok=True)
     # Write a temporary file first so an interrupted run never leaves half a list
     with open(f'{database}.tmp', 'w') as db:
         db.write(packages)
     os.replace(f'{database}.tmp', database)
-    print(f'saved to {database}')
+    print(f'saved to {database}' if packages else 'no updates yet')
 
-def search(database, query, show_sha=False):
+def search(release, arch, query, show_sha=False):
     query = query.lower()
-    with open(database) as db:
-        for line in db:
-            # SHA256 (curl-8.22.0.tgz) = <base64 hash>=
-            # the hash group stops before the trailing '=' padding
-            match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
-            if not match or query not in match.group(1).lower():
-                continue
-            if show_sha:
-                print(f'Package: {match.group(1)}')
-                print(f'SHA256: {match.group(2)}')
-            else:
-                print(match.group(1))
+    matches = []
+    for folder in FOLDERS:
+        label = ' (stable)' if folder == 'packages-stable' else ''
+        with open(local_list(release, arch, folder)) as db:
+            for line in db:
+                # SHA256 (curl-8.22.0.tgz) = <base64 hash>=
+                # the hash group stops before the trailing '=' padding
+                match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
+                if match and query in match.group(1).lower():
+                    matches.append((match.group(1), label, match.group(2)))
+    # Updates can't be matched to the package they replace by name alone
+    # (e.g. borgbackup 1.x and 2.x), so list both, labelled, side by side
+    # Name first, then version: wget before wget2, curl-8.9.0 before curl-8.10.1
+    def order(match):
+        return re.split(r'-(?=\d)', match[0], maxsplit=1)[0], version_order(match[0])
+    for package, label, sha256 in sorted(matches, key=order):
+        if show_sha:
+            print(f'Package: {package}{label}')
+            print(f'SHA256: {sha256}')
+        else:
+            print(f'{package}{label}')
+    # packages never changes after a release, but packages-stable keeps growing
+    days = (time.time() - os.path.getmtime(local_list(release, arch, 'packages-stable'))) / 86400
+    if days > 7:
+        print(f'Note: the updates list is {days:.0f} days old, run with --update for newer ones',
+            file=sys.stderr)
 
 def name_matching(pattern, example):
     # --release and --arch become cache directories, so allow only plain names
@@ -144,7 +164,7 @@ def main():
     parser = argparse.ArgumentParser(
         description='Search the OpenBSD package list from a local database.')
     parser.add_argument('query', nargs='?', help='package name to search for (case-insensitive)')
-    parser.add_argument('--update', action='store_true', help='re-download the package list')
+    parser.add_argument('--update', action='store_true', help='re-download the package lists')
     parser.add_argument('--release', type=name_matching(r'\d+\.\d+|snapshots', '7.8 or snapshots'),
         help='OpenBSD release to search, e.g. 7.8, downloaded if needed (default: the installed'
         ' release on OpenBSD; elsewhere the newest downloaded list, or the latest release)')
@@ -160,17 +180,20 @@ def main():
         return
 
     target = pick_list(args.release, args.arch, args.update)
-    database = local_list(*target)
-    if args.update or not os.path.isfile(database):
-        download(*target)
+    # Fetch only what is missing, so a list left out by a failed run is filled in
+    missing = [folder for folder in FOLDERS
+        if args.update or not os.path.isfile(local_list(*target, folder))]
+    if missing:
+        for folder in missing:
+            download(*target, folder)
     elif args.SHA256:
-        search(database, args.query, show_sha=True)
+        search(*target, args.query, show_sha=True)
         sys.exit(0)
     elif args.query is None:
         sys.exit('ERROR: Please supply some package!')
 
     if args.query is not None:
-        search(database, args.query, show_sha=False)
+        search(*target, args.query, show_sha=False)
 
 if __name__ == '__main__':
     main()
