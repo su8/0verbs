@@ -82,7 +82,7 @@ def search(query, show_sha=False):
                     package = match.group(1)
                     sha256 = match.group(2)
                     print(f'Package: {package}')
-                    print(f'SHA256: {sha256}')
+                    print(f'SHA256: {sha256}'.rstrip('='))
             else:
                 # SHA256 (curl-8.22.0.tgz) = <hash>
                 match = re.search(r'\((.+)\.tgz\)', line)
