@@ -59,8 +59,25 @@ def version_order(name):
     # Compare digit runs as numbers, so 10.0 sorts after 7.8
     return [int(part) if part.isdigit() else part for part in re.split(r'(\d+)', name)]
 
+def fetch(url, announce=False):
+    if announce:
+        print(f'Downloading {url} ...', end=' ', flush=True)
+    try:
+        with urlopen(url, timeout=120) as response:
+            return response.read().decode('utf-8')
+    except HTTPError as err:
+        error = f'ERROR: {err} for {url}'
+        if err.code == 404:
+            error += (f'\nUse --release and/or --arch to pick a release and architecture'
+                f' that exist on {MIRROR}')
+    except OSError as err:
+        error = f'ERROR: could not download {url}: {err}'
+    if announce:
+        print()
+    sys.exit(error)
+
 def mirror_releases():
-    listing = urlopen(f'{MIRROR}/', timeout=120).read().decode('utf-8')
+    listing = fetch(f'{MIRROR}/')
     return sorted(re.findall(r'href="(\d+\.\d+)/"', listing), key=version_order)
 
 def default_release():
@@ -75,13 +92,7 @@ def default_arch():
 
 def download(release, arch):
     url = f'{MIRROR}/{release or default_release()}/packages/{arch or default_arch()}/SHA256'
-    print(f'Downloading {url} ...', end=' ', flush=True)
-    try:
-        packages = urlopen(url, timeout=120).read().decode('utf-8')
-    except HTTPError as err:
-        print()
-        sys.exit(f'ERROR: {err} for {url}\nUse --release and/or --arch'
-            ' to pick a release and architecture that exist on the mirror.')
+    packages = fetch(url, announce=True)
     with open(DATABASE, 'w') as db:
         db.write(packages)
     print(f'saved to {DATABASE}')
