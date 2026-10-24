@@ -162,7 +162,20 @@ def name_matching(pattern, example):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Search the OpenBSD package list from a local database.')
+        description='Search the OpenBSD package list from a local database.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f'''examples:
+  0verbs.py curl                    packages whose name contains "curl"
+  0verbs.py php curl 8.4            packages whose name contains every word
+  0verbs.py --sha256 curl           also show each package's SHA256 sum
+  0verbs.py --release 7.8 --arch amd64 curl
+                                    search another release or architecture
+  0verbs.py --update                re-download the package lists
+  0verbs.py --list-releases         list the releases on the mirror
+
+Package lists are saved under {CACHE}.
+The mirror is read from {INSTALLURL}, or from
+{DEFAULT_MIRROR} if it is missing.''')
     parser.add_argument('queries', nargs='*', metavar='package',
         help='words to search for, case-insensitive; a package must contain all of them')
     parser.add_argument('--sha256', action='store_true', help='also show each package\'s SHA256 sum')
