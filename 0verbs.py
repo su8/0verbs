@@ -43,13 +43,13 @@ ARCH_NAMES = {
     'mips64': 'mips64',
 }
 
-def default_release(list_only=False):
+def default_release(list_releases_only=False):
     # Packages only install on the release they were built for
-    if platform.system() == 'OpenBSD' and list_only == False:
+    if platform.system() == 'OpenBSD' and list_releases_only == False:
         return platform.release()
     listing = urlopen(f'{MIRROR}/', timeout=120).read().decode('utf-8')
     releases = re.findall(r'href="(\d+\.\d+)/"', listing)
-    if list_only:
+    if list_releases_only:
         for release in sorted(releases):
             print(release)
         return None
@@ -96,7 +96,7 @@ def main():
     if args.update or args.release or args.arch or not os.path.isfile(DATABASE):
         download(args.release, args.arch)
     elif args.list_releases:
-        default_release(list_only=True)
+        default_release(list_releases_only=True)
         sys.exit(0)
     elif args.query is None:
         sys.exit('ERROR: Please supply some package!')

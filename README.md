@@ -15,6 +15,9 @@ python3 0verbs.py 'LibreOffice'
 # re-download the database (e.g. after upgrading OpenBSD)
 python3 0verbs.py --update
 
+# to list all of the available releases
+python3 0verbs.py --list-releases
+
 # or use the slow option
 pkg_info -Q 'curl'
 ```
@@ -27,9 +30,18 @@ Outside OpenBSD the script downloads the latest release and maps your CPU to the
 
 ```bash
 python3 0verbs.py --release 7.8 --arch amd64 'curl'
+```
 
-# to list all of the available releases
-python3 0verbs.py --list-releases
+### Add it to your shell configuration file:
+
+```bash
+# Specifying function named "ss"
+ss() {
+  python3 0verbs.py "$@"
+}
+
+# and use it
+ss 'curl'
 ```
 
 ---
