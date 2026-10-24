@@ -62,57 +62,10 @@ ss 'curl'
 
 ### Adding package suggestions for misspelt string such as firfox
 
-Copy and paste the following code and you are ready to rock (copy the lines that start with +:
+Copy and paste the following snippet and you are ready to rock:
 
-```diff
-diff --git a/0verbs.py b/0verbs.py
-index 518d904..36dbfb4 100644
---- a/0verbs.py
-+++ b/0verbs.py
-@@ -25,6 +25,7 @@ import sys
- import time
- from urllib.error import HTTPError
- from urllib.request import urlopen
-+from difflib import get_close_matches
- 
- # Each download is kept as <release>/<folder>/<arch>/SHA256, the same path as on the mirror
- CACHE = os.path.join(os.path.expanduser('~'), '.cache', '0verbs')
-@@ -130,8 +131,9 @@ REGEX_SYNTAX = set('^$*?()[]{}|\\')
- def word_pattern(word):
-     return re.compile(word if REGEX_SYNTAX & set(word) else re.escape(word), re.IGNORECASE)
- 
--def search(release, arch, patterns, show_sha=False):
-+def search(release, arch, patterns, queries=None, show_sha=False):
-     matches = []
-+    packages = []
-     for folder in FOLDERS:
-         label = ' (stable)' if folder == 'packages-stable' else ''
-         with open(local_list(release, arch, folder)) as db:
-@@ -142,6 +144,16 @@ def search(release, arch, patterns, show_sha=False):
-                 # Every word must match, as in pacman -Ss and dnf search
-                 if match and all(pattern.search(match.group(1)) for pattern in patterns):
-                     matches.append((match.group(1), label, match.group(2)))
-+                if match:
-+                    packages.append(match.group(1))
-+
-+    if not matches and queries and len(queries) == 1:
-+        suggestions = get_close_matches(queries[0], packages, n=5, cutoff=0.4)
-+        if suggestions:
-+            print('\nDid you mean?')
-+            for pkg in suggestions:
-+                print(f'  {pkg}')
-+            return
-     # Updates can't be matched to the package they replace by name alone
-     # (e.g. borgbackup 1.x and 2.x), so list both, labelled, side by side
-     # Name first, then version: wget before wget2, curl-8.9.0 before curl-8.10.1
-@@ -219,7 +231,7 @@ The mirror is read from {INSTALLURL}, or from
-         download(*target, folder)
- 
-     if args.queries:
--        search(*target, patterns, show_sha=args.sha256)
-+        search(*target, patterns, queries=args.queries, show_sha=args.sha256)
-     elif not missing:
-         sys.exit('ERROR: Please supply some package!')
+```bash
+git apply suggestPacks.diff
 ```
 
 ---
