@@ -25,7 +25,19 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 DATABASE = os.path.join(os.path.expanduser('~'), '.package_list')
-MIRROR = 'https://cdn.openbsd.org/pub/OpenBSD'
+INSTALLURL = '/etc/installurl'
+DEFAULT_MIRROR = 'https://cdn.openbsd.org/pub/OpenBSD'
+
+def mirror():
+    # Use the same mirror as pkg_add(1): the first line of installurl(5)
+    try:
+        with open(INSTALLURL) as installurl:
+            url = installurl.readline().strip().rstrip('/')
+    except OSError:
+        url = ''
+    return url or DEFAULT_MIRROR
+
+MIRROR = mirror()
 
 # platform.machine() names (Linux, macOS and OpenBSD's `uname -m`)
 # mapped to OpenBSD package architectures, i.e. what `machine -a` prints
