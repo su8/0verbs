@@ -16,7 +16,7 @@ python3 0verbs.py 'LibreOffice'
 python3 0verbs.py --update
 
 # or use the slow option
-pkg_info -aQ 'curl'
+pkg_info -Q 'curl'
 ```
 
 ---

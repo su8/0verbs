@@ -25,7 +25,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 DATABASE = os.path.join(os.path.expanduser('~'), '.package_list')
-MIRROR = 'https://ftp.openbsd.org/pub/OpenBSD'
+MIRROR = 'https://cdn.openbsd.org/pub/OpenBSD'
 
 # platform.machine() names (Linux, macOS and OpenBSD's `uname -m`)
 # mapped to OpenBSD package architectures, i.e. what `machine -a` prints
