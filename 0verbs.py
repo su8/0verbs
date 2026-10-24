@@ -55,17 +55,19 @@ ARCH_NAMES = {
     'mips64': 'mips64',
 }
 
-def default_release(list_releases_only=False):
-    # Packages only install on the release they were built for
-    if platform.system() == 'OpenBSD' and list_releases_only == False:
-        return platform.release()
+def version_order(name):
+    # Compare digit runs as numbers, so 10.0 sorts after 7.8
+    return [int(part) if part.isdigit() else part for part in re.split(r'(\d+)', name)]
+
+def mirror_releases():
     listing = urlopen(f'{MIRROR}/', timeout=120).read().decode('utf-8')
-    releases = re.findall(r'href="(\d+\.\d+)/"', listing)
-    if list_releases_only:
-        for release in sorted(releases):
-            print(release)
-        return None
-    return max(releases, key=lambda release: tuple(map(int, release.split('.'))))
+    return sorted(re.findall(r'href="(\d+\.\d+)/"', listing), key=version_order)
+
+def default_release():
+    # Packages only install on the release they were built for
+    if platform.system() == 'OpenBSD':
+        return platform.release()
+    return mirror_releases()[-1]
 
 def default_arch():
     machine = platform.machine().lower()
@@ -113,8 +115,8 @@ def main():
     args = parser.parse_args()
 
     if args.list_releases:
-        default_release(list_releases_only=True)
-        sys.exit(0)
+        print(*mirror_releases(), sep='\n')
+        return
 
     if args.update or args.release or args.arch or not os.path.isfile(DATABASE):
         download(args.release, args.arch)
