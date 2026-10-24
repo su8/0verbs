@@ -43,12 +43,19 @@ ARCH_NAMES = {
     'mips64': 'mips64',
 }
 
-def default_release():
+def default_release(list_only=False):
     # Packages only install on the release they were built for
     if platform.system() == 'OpenBSD':
-        return platform.release()
+        release = platform.release()
+        if list_only:
+            print(release)
+        return release
     listing = urlopen(f'{MIRROR}/', timeout=120).read().decode('utf-8')
     releases = re.findall(r'href="(\d+\.\d+)/"', listing)
+    if list_only:
+        for release in sorted(releases):
+            print(release)
+        return None
     return max(releases, key=lambda release: tuple(map(int, release.split('.'))))
 
 def default_arch():
@@ -86,10 +93,14 @@ def main():
         ' (default: the installed one on OpenBSD, otherwise the latest)')
     parser.add_argument('--arch', help='package architecture to download, e.g. amd64'
         ' (default: this machine\'s)')
+    parser.add_argument('--list-releases', action='store_true', help='list available OpenBSD releases on the mirror')
     args = parser.parse_args()
 
     if args.update or args.release or args.arch or not os.path.isfile(DATABASE):
         download(args.release, args.arch)
+    elif args.list_releases:
+        default_release(list_only=True)
+        sys.exit(0)
     elif args.query is None:
         sys.exit('ERROR: Please supply some package!')
 
