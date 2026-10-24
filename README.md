@@ -60,6 +60,16 @@ ss 'curl'
 
 ---
 
+### Adding package suggestions for misspelt string such as firfox
+
+Apply the patch and you are ready to rock:
+
+```bash
+git apply packageSuggestions.diff
+```
+
+---
+
 ### pkg_locate/locate are better ?
 
 If you plan to use `0verbs` it's because it creates database for the pre-compiled binaries that you will install with `pkg_add`. It **doesn't** traverses `the local ports tree` like pkg_locate/locate does. It doesn't replaces your regular local tree port searches with `Makefile(s)`. It's up to you what you would like to use - ports vs pre-compiled binaries :)
