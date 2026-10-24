@@ -122,8 +122,10 @@ def download(release, arch, folder):
     os.replace(f'{database}.tmp', database)
     print(f'saved to {database}' if packages else 'no updates yet')
 
-def search(release, arch, queries, show_sha=False):
+def search(release, arch, queries, show_sha=False, match_any=False):
     queries = [query.lower() for query in queries]
+    # Like dnf search: every word must match, unless --any asks for one
+    combine = any if match_any else all
     matches = []
     for folder in FOLDERS:
         label = ' (stable)' if folder == 'packages-stable' else ''
@@ -132,7 +134,7 @@ def search(release, arch, queries, show_sha=False):
                 # SHA256 (curl-8.22.0.tgz) = <base64 hash>=
                 # the hash group stops before the trailing '=' padding
                 match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
-                if match and all(query in match.group(1).lower() for query in queries):
+                if match and combine(query in match.group(1).lower() for query in queries):
                     matches.append((match.group(1), label, match.group(2)))
     # Updates can't be matched to the package they replace by name alone
     # (e.g. borgbackup 1.x and 2.x), so list both, labelled, side by side
@@ -167,6 +169,7 @@ def main():
         epilog=f'''examples:
   0verbs.py curl                    packages whose name contains "curl"
   0verbs.py php curl 8.4            packages whose name contains every word
+  0verbs.py --any php perl          packages whose name contains any word
   0verbs.py --sha256 curl           also show each package's SHA256 sum
   0verbs.py --release 7.8 --arch amd64 curl
                                     search another release or architecture
@@ -178,6 +181,7 @@ The mirror is read from {INSTALLURL}, or from
 {DEFAULT_MIRROR} if it is missing.''')
     parser.add_argument('queries', nargs='*', metavar='package',
         help='words to search for, case-insensitive; a package must contain all of them')
+    parser.add_argument('--any', action='store_true', help='list packages containing any of the words')
     parser.add_argument('--sha256', action='store_true', help='also show each package\'s SHA256 sum')
     parser.add_argument('--update', action='store_true', help='re-download the package lists')
     parser.add_argument('--release', type=name_matching(r'\d+\.\d+|snapshots', '7.8 or snapshots'),
@@ -201,7 +205,7 @@ The mirror is read from {INSTALLURL}, or from
         download(*target, folder)
 
     if args.queries:
-        search(*target, args.queries, show_sha=args.sha256)
+        search(*target, args.queries, show_sha=args.sha256, match_any=args.any)
     elif not missing:
         sys.exit('ERROR: Please supply some package!')
 

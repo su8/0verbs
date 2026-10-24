@@ -15,6 +15,9 @@ python3 0verbs.py LibreOffice
 # narrow the search with several words (a package must contain all of them)
 python3 0verbs.py php curl
 
+# or list packages containing any of the words
+python3 0verbs.py --any php perl
+
 # to list the package name and sha256 sum
 python3 0verbs.py --sha256 curl
 
