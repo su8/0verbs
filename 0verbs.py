@@ -122,10 +122,15 @@ def download(release, arch, folder):
     os.replace(f'{database}.tmp', database)
     print(f'saved to {database}' if packages else 'no updates yet')
 
-def search(release, arch, queries, show_sha=False, match_any=False):
-    queries = [query.lower() for query in queries]
-    # Like dnf search: every word must match, unless --any asks for one
-    combine = any if match_any else all
+# A word using any of these is a regular expression, like in pacman -Ss.
+# Package names only ever contain + and . of the others, so gtk+, c++ and
+# 8.4 keep matching as plain text.
+REGEX_SYNTAX = set('^$*?()[]{}|\\')
+
+def word_pattern(word):
+    return re.compile(word if REGEX_SYNTAX & set(word) else re.escape(word), re.IGNORECASE)
+
+def search(release, arch, patterns, show_sha=False):
     matches = []
     for folder in FOLDERS:
         label = ' (stable)' if folder == 'packages-stable' else ''
@@ -134,7 +139,8 @@ def search(release, arch, queries, show_sha=False, match_any=False):
                 # SHA256 (curl-8.22.0.tgz) = <base64 hash>=
                 # the hash group stops before the trailing '=' padding
                 match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
-                if match and combine(query in match.group(1).lower() for query in queries):
+                # Every word must match, as in pacman -Ss and dnf search
+                if match and all(pattern.search(match.group(1)) for pattern in patterns):
                     matches.append((match.group(1), label, match.group(2)))
     # Updates can't be matched to the package they replace by name alone
     # (e.g. borgbackup 1.x and 2.x), so list both, labelled, side by side
@@ -169,7 +175,8 @@ def main():
         epilog=f'''examples:
   0verbs.py curl                    packages whose name contains "curl"
   0verbs.py php curl 8.4            packages whose name contains every word
-  0verbs.py --any php perl          packages whose name contains any word
+  0verbs.py 'php|perl'              packages whose name contains either word
+  0verbs.py '^php-8\\.'              names matching a regular expression
   0verbs.py --sha256 curl           also show each package's SHA256 sum
   0verbs.py --release 7.8 --arch amd64 curl
                                     search another release or architecture
@@ -180,8 +187,8 @@ Package lists are saved under {CACHE}.
 The mirror is read from {INSTALLURL}, or from
 {DEFAULT_MIRROR} if it is missing.''')
     parser.add_argument('queries', nargs='*', metavar='package',
-        help='words to search for, case-insensitive; a package must contain all of them')
-    parser.add_argument('--any', action='store_true', help='list packages containing any of the words')
+        help='words to search for, case-insensitive; a package must contain all of them.'
+        ' A word with any of ^$*?()[]{}|\\ is a regular expression')
     parser.add_argument('--sha256', action='store_true', help='also show each package\'s SHA256 sum')
     parser.add_argument('--update', action='store_true', help='re-download the package lists')
     parser.add_argument('--release', type=name_matching(r'\d+\.\d+|snapshots', '7.8 or snapshots'),
@@ -197,6 +204,11 @@ The mirror is read from {INSTALLURL}, or from
         print(*mirror_releases(), sep='\n')
         return
 
+    try:
+        patterns = [word_pattern(word) for word in args.queries]
+    except re.error as err:
+        parser.error(f'invalid regular expression {err.pattern!r}: {err}')
+
     target = pick_list(args.release, args.arch, args.update)
     # Fetch only what is missing, so a list left out by a failed run is filled in
     missing = [folder for folder in FOLDERS
@@ -205,7 +217,7 @@ The mirror is read from {INSTALLURL}, or from
         download(*target, folder)
 
     if args.queries:
-        search(*target, args.queries, show_sha=args.sha256, match_any=args.any)
+        search(*target, patterns, show_sha=args.sha256)
     elif not missing:
         sys.exit('ERROR: Please supply some package!')
 
