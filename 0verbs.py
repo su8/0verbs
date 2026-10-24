@@ -88,18 +88,16 @@ def search(query, show_sha=False):
     query = query.lower()
     with open(DATABASE) as db:
         for line in db:
+            # SHA256 (curl-8.22.0.tgz) = <base64 hash>=
+            # the hash group stops before the trailing '=' padding
+            match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
+            if not match or query not in match.group(1).lower():
+                continue
             if show_sha:
-                match = re.search(r'SHA256 \((.*?)\.tgz\) = (\S+)', line)
-                if match and query in match.group(1).lower():
-                    package = match.group(1)
-                    sha256 = match.group(2)
-                    print(f'Package: {package}')
-                    print(f'SHA256: {sha256}'.rstrip('='))
+                print(f'Package: {match.group(1)}')
+                print(f'SHA256: {match.group(2)}')
             else:
-                # SHA256 (curl-8.22.0.tgz) = <hash>
-                match = re.search(r'\((.+)\.tgz\)', line)
-                if match and query in match.group(1).lower():
-                    print(match.group(1))
+                print(match.group(1))
 
 def main():
     parser = argparse.ArgumentParser(
