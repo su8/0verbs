@@ -153,6 +153,8 @@ def search(release, arch, patterns, show_sha=False):
             print(f'SHA256: {sha256}')
         else:
             print(f'{package}{label}')
+    if not matches:
+        print('No matches found.', file=sys.stderr)
     # packages never changes after a release, but packages-stable keeps growing
     days = (time.time() - os.path.getmtime(local_list(release, arch, 'packages-stable'))) / 86400
     if days > 7:
