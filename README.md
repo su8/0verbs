@@ -12,6 +12,9 @@ python3 0verbs.py 'curl'
 # searches are case-insensitive
 python3 0verbs.py 'LibreOffice'
 
+# to list the package name and sha256 sum
+python3 0verbs.py 'curl' SHA256
+
 # re-download the database (e.g. after upgrading OpenBSD)
 python3 0verbs.py --update
 

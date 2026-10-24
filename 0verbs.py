@@ -72,14 +72,22 @@ def download(release, arch):
         db.write(packages)
     print(f'saved to {DATABASE}')
 
-def search(query):
+def search(query, show_sha=False):
     query = query.lower()
     with open(DATABASE) as db:
         for line in db:
-            # SHA256 (curl-8.22.0.tgz) = <hash>
-            match = re.search(r'\((.+)\.tgz\)', line)
-            if match and query in match.group(1).lower():
-                print(match.group(1))
+            if show_sha:
+                match = re.search(r'SHA256 \((.*?)\.tgz\) = (\S+)', line)
+                if match and query in match.group(1).lower():
+                    package = match.group(1)
+                    sha256 = match.group(2)
+                    print(f'Package: {package}')
+                    print(f'SHA256: {sha256}')
+            else:
+                # SHA256 (curl-8.22.0.tgz) = <hash>
+                match = re.search(r'\((.+)\.tgz\)', line)
+                if match and query in match.group(1).lower():
+                    print(match.group(1))
 
 def main():
     parser = argparse.ArgumentParser(
@@ -91,10 +99,14 @@ def main():
     parser.add_argument('--arch', help='package architecture to download, e.g. amd64'
         ' (default: this machine\'s)')
     parser.add_argument('--list-releases', action='store_true', help='list available OpenBSD releases on the mirror')
+    parser.add_argument('SHA256', nargs='?', help='Show the SHA256 sum for the particular package search')
     args = parser.parse_args()
 
     if args.update or args.release or args.arch or not os.path.isfile(DATABASE):
         download(args.release, args.arch)
+    elif args.SHA256:
+        search(args.query, show_sha=True)
+        sys.exit(0)
     elif args.list_releases:
         default_release(list_releases_only=True)
         sys.exit(0)
@@ -102,7 +114,7 @@ def main():
         sys.exit('ERROR: Please supply some package!')
 
     if args.query is not None:
-        search(args.query)
+        search(args.query, show_sha=False)
 
 if __name__ == '__main__':
     main()
