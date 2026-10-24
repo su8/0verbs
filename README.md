@@ -12,8 +12,11 @@ python3 0verbs.py curl
 # searches are case-insensitive
 python3 0verbs.py LibreOffice
 
+# narrow the search with several words (a package must contain all of them)
+python3 0verbs.py php curl
+
 # to list the package name and sha256 sum
-python3 0verbs.py curl SHA256
+python3 0verbs.py --sha256 curl
 
 # re-download the package lists (e.g. after upgrading OpenBSD, or for new security updates)
 python3 0verbs.py --update

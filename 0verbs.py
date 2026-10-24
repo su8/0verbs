@@ -122,8 +122,8 @@ def download(release, arch, folder):
     os.replace(f'{database}.tmp', database)
     print(f'saved to {database}' if packages else 'no updates yet')
 
-def search(release, arch, query, show_sha=False):
-    query = query.lower()
+def search(release, arch, queries, show_sha=False):
+    queries = [query.lower() for query in queries]
     matches = []
     for folder in FOLDERS:
         label = ' (stable)' if folder == 'packages-stable' else ''
@@ -132,7 +132,7 @@ def search(release, arch, query, show_sha=False):
                 # SHA256 (curl-8.22.0.tgz) = <base64 hash>=
                 # the hash group stops before the trailing '=' padding
                 match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
-                if match and query in match.group(1).lower():
+                if match and all(query in match.group(1).lower() for query in queries):
                     matches.append((match.group(1), label, match.group(2)))
     # Updates can't be matched to the package they replace by name alone
     # (e.g. borgbackup 1.x and 2.x), so list both, labelled, side by side
@@ -163,7 +163,9 @@ def name_matching(pattern, example):
 def main():
     parser = argparse.ArgumentParser(
         description='Search the OpenBSD package list from a local database.')
-    parser.add_argument('query', nargs='?', help='package name to search for (case-insensitive)')
+    parser.add_argument('queries', nargs='*', metavar='package',
+        help='words to search for, case-insensitive; a package must contain all of them')
+    parser.add_argument('--sha256', action='store_true', help='also show each package\'s SHA256 sum')
     parser.add_argument('--update', action='store_true', help='re-download the package lists')
     parser.add_argument('--release', type=name_matching(r'\d+\.\d+|snapshots', '7.8 or snapshots'),
         help='OpenBSD release to search, e.g. 7.8, downloaded if needed (default: the installed'
@@ -172,8 +174,7 @@ def main():
         help='package architecture to search, e.g. amd64, downloaded if needed'
         ' (default: this machine\'s, or the newest downloaded list\'s outside OpenBSD)')
     parser.add_argument('--list-releases', action='store_true', help='list available OpenBSD releases on the mirror')
-    parser.add_argument('SHA256', nargs='?', help='Show the SHA256 sum for the particular package search')
-    args = parser.parse_args()
+    args = parser.parse_intermixed_args()
 
     if args.list_releases:
         print(*mirror_releases(), sep='\n')
@@ -183,17 +184,13 @@ def main():
     # Fetch only what is missing, so a list left out by a failed run is filled in
     missing = [folder for folder in FOLDERS
         if args.update or not os.path.isfile(local_list(*target, folder))]
-    if missing:
-        for folder in missing:
-            download(*target, folder)
-    elif args.SHA256:
-        search(*target, args.query, show_sha=True)
-        sys.exit(0)
-    elif args.query is None:
-        sys.exit('ERROR: Please supply some package!')
+    for folder in missing:
+        download(*target, folder)
 
-    if args.query is not None:
-        search(*target, args.query, show_sha=False)
+    if args.queries:
+        search(*target, args.queries, show_sha=args.sha256)
+    elif not missing:
+        sys.exit('ERROR: Please supply some package!')
 
 if __name__ == '__main__':
     main()
