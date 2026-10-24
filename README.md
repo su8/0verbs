@@ -27,6 +27,9 @@ Outside OpenBSD the script downloads the latest release and maps your CPU to the
 
 ```bash
 python3 0verbs.py --release 7.8 --arch amd64 'curl'
+
+# to list all of the available releases
+python3 0verbs.py --list-releases
 ```
 
 ---
