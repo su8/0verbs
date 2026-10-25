@@ -44,7 +44,7 @@ Outside OpenBSD the script downloads the latest release and maps your CPU to the
 python3 0verbs.py --release 7.8 --arch amd64 'curl'
 ```
 
-Like `pkg_add`, the script also downloads `packages-stable`, where a release's security and bug-fix updates go, and labels those results `(stable)`, e.g. `curl-8.19.0 (stable)` next to `curl-8.16.0`. That list keeps growing, so the script reminds you to run `--update` once it is more than a week old. Each download is kept under `~/.cache/0verbs/<release>/<folder>/<arch>/SHA256`, the same path it has on the mirror, so switching between releases doesn't download again. Without `--release`/`--arch`, searches use the list you downloaded most recently (on OpenBSD, always the installed release). Older versions saved a single `~/.package_list`, which you can delete.
+Like `pkg_add`, the script also downloads `packages-stable`, where a release's security and bug-fix updates go, and labels those results `(stable)`. As `pkg_add` would install the update, a release package that has one is left out, so `curl` shows `curl-8.19.0 (stable)` but not `curl-8.16.0`. The `packages-stable` list keeps growing, so the script reminds you to run `--update` once it is more than a week old. Each download is kept under `~/.cache/0verbs/<release>/<folder>/<arch>/SHA256`, the same path it has on the mirror, so switching between releases doesn't download again. Without `--release`/`--arch`, searches use the list you downloaded most recently (on OpenBSD, always the installed release). Older versions saved a single `~/.package_list`, which you can delete.
 
 ### Add it to your shell configuration file:
 

@@ -65,6 +65,22 @@ def version_order(name):
     # Compare digit runs as numbers, so 10.0 sorts after 7.8 and curl-8.10.1 after curl-8.9.0
     return [int(part) if part.isdigit() else part for part in re.split(r'(\d+)', name)]
 
+# OpenBSD package names are stem-version[-flavor], the version being the first
+# part after a dash that starts with a digit; see packages-specs(7)
+PACKAGE_NAME = re.compile(r'(?P<stem>.+?)-(?P<version>\d[^-]*?)(?P<flavor>(?:-[^-]+)*)$')
+
+def hide_superseded(matches):
+    # pkg_add installs the packages-stable update instead of the release package
+    # it replaces, so hide a release package when an update with the same stem,
+    # flavor and first version number is listed too. The first number keeps
+    # side-by-side versions apart: jdk-21 stays when only jdk-17 was updated
+    def line(name):
+        parts = PACKAGE_NAME.match(name)
+        return parts and (parts['stem'], parts['flavor'], re.match(r'\d+', parts['version'])[0])
+    updated = {line(name) for name, label, _ in matches if label}
+    return [match for match in matches
+        if match[1] or not line(match[0]) or line(match[0]) not in updated]
+
 def fetch(url, announce=False, missing_ok=False):
     if announce:
         print(f'Downloading {url} ...', end=' ', flush=True)
@@ -157,8 +173,7 @@ def search(release, arch, patterns, queries=None, show_sha=False):
             for pkg in suggestions:
                 print(f'  {pkg}')
             return
-    # Updates can't be matched to the package they replace by name alone
-    # (e.g. borgbackup 1.x and 2.x), so list both, labelled, side by side
+    matches = hide_superseded(matches)
     # Name first, then version: wget before wget2, curl-8.9.0 before curl-8.10.1
     def order(match):
         return re.split(r'-(?=\d)', match[0], maxsplit=1)[0], version_order(match[0])
