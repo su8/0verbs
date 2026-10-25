@@ -133,28 +133,30 @@ def word_pattern(word):
 
 def search(release, arch, patterns, queries=None, show_sha=False):
     matches = []
-    packages = []
+    packages_as_suggestions = []
     for folder in FOLDERS:
         label = ' (stable)' if folder == 'packages-stable' else ''
-        with open(local_list(release, arch, folder)) as db:
-            for line in db:
-                # SHA256 (curl-8.22.0.tgz) = <base64 hash>=
-                # the hash group stops before the trailing '=' padding
-                match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
-                # Every word must match, as in pacman -Ss and dnf search
-                if match and all(pattern.search(match.group(1)) for pattern in patterns):
-                    matches.append((match.group(1), label, match.group(2)))
-                if match:
-                    packages.append(match.group(1))
-
+        try:
+            with open(local_list(release, arch, folder)) as db:
+                for line in db:
+                    # SHA256 (curl-8.22.0.tgz) = <base64 hash>=
+                    # the hash group stops before the trailing '=' padding
+                    match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
+                    # Every word must match, as in pacman -Ss and dnf search
+                    if match and all(pattern.search(match.group(1)) for pattern in patterns):
+                        matches.append((match.group(1), label, match.group(2)))
+                    if match:
+                        packages_as_suggestions.append(match.group(1))
+        except FileNotFoundError:
+            pass
+    # If suggestions patch is applied try to suggests misspelt query
     if not matches and queries and len(queries) == 1:
-        suggestions = get_close_matches(queries[0], packages, n=5, cutoff=0.4)
+        suggestions = get_close_matches(queries[0], packages_as_suggestions, n=5, cutoff=0.4)
         if suggestions:
             print('\nDid you mean?')
             for pkg in suggestions:
                 print(f'  {pkg}')
             return
-
     # Updates can't be matched to the package they replace by name alone
     # (e.g. borgbackup 1.x and 2.x), so list both, labelled, side by side
     # Name first, then version: wget before wget2, curl-8.9.0 before curl-8.10.1
