@@ -73,10 +73,14 @@ def package_matches(name, patterns, exact=False):
     if not exact:
         # Every word must match, as in pacman -Ss and dnf search
         return all(pattern.search(name) for pattern in patterns)
-    # Exact: a word must equal the whole stem, or the whole name (curl-8.22.0).
-    # Several words list several packages, since one stem can't equal two words
+    # Exact: a word must equal the whole name (curl-8.22.0), the stem (curl),
+    # or the stem without a trailing major version (wget2 -> wget, gtk+3 -> gtk+).
+    # Several words list several packages, since one name can't equal two words
     parts = PACKAGE_NAME.match(name)
-    candidates = (name, parts['stem']) if parts else (name,)
+    candidates = {name}
+    if parts:
+        stem = parts['stem']
+        candidates |= {stem, re.sub(r'\d+$', '', stem)}
     return any(pattern.fullmatch(candidate)
         for pattern in patterns for candidate in candidates)
 
