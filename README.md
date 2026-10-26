@@ -68,7 +68,7 @@ ss 'curl'
 Copy and paste the following snippet and you are ready to rock:
 
 ```bash
-git apply suggestPacks.diff
+git apply suggestPackages.diff
 ```
 
 ---
