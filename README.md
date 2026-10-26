@@ -19,13 +19,23 @@ python3 0verbs.py php curl
 python3 0verbs.py 'php|perl'
 
 # a word with regular expression syntax (any of ^$*?()[]{}|\) is a regex, like pacman -Ss
-python3 0verbs.py '^php-8\.'
+python3 0verbs.py '^curl-.*'      # names starting with curl-, so not curlftpfs
+python3 0verbs.py '^(php|perl)'   # names starting with php or perl
+python3 0verbs.py '^php.*curl'    # names starting with php, with curl later on
+python3 0verbs.py '^py3-.*yaml'   # Python 3 modules about yaml
+python3 0verbs.py 'gtk\+'         # a plain +, as in gtk+; \ makes + ordinary
 
 # to list the package name and sha256 sum
 python3 0verbs.py --sha256 curl
 
-# to list the exact package, for example curl
-python3 0verbs.py --exact curl
+# to list the exact package, newest version: curl, but not curl-doc or libcurl
+python3 0verbs.py -e curl            # or --exact curl
+
+# several exact packages at once
+python3 0verbs.py -e curl wget
+
+# the same package with every version on the mirror, as a regular expression
+python3 0verbs.py '^curl-[0-9]'
 
 # re-download the package lists (e.g. after upgrading OpenBSD, or for new security updates)
 python3 0verbs.py --update

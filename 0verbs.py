@@ -66,8 +66,10 @@ def version_order(name):
     return [int(part) if part.isdigit() else part for part in re.split(r'(\d+)', name)]
 
 # OpenBSD package names are stem-version[-flavor], the version being the first
-# part after a dash that starts with a digit; see packages-specs(7)
-PACKAGE_NAME = re.compile(r'(?P<stem>.+?)-(?P<version>\d[^-]*?)(?P<flavor>(?:-[^-]+)*)$')
+# part after a dash that starts with a digit and ending in an optional pN
+# (packaging fix) and vN (epoch); see packages-specs(7)
+PACKAGE_NAME = re.compile(r'(?P<stem>.+?)-(?P<version>\d[^-]*?)(?:p(?P<p>\d+))?(?:v(?P<v>\d+))?'
+    r'(?P<flavor>(?:-[^-]+)*)$')
 
 def hide_superseded(matches):
     # pkg_add installs the packages-stable update instead of the release package
@@ -147,41 +149,31 @@ REGEX_SYNTAX = set('^$*?()[]{}|\\')
 def word_pattern(word):
     return re.compile(word if REGEX_SYNTAX & set(word) else re.escape(word), re.IGNORECASE)
 
+def exact_name(name, patterns):
+    # --exact: a word must equal the whole name (curl-8.22.0) or its stem (curl),
+    # so curl doesn't find curl-doc and wget doesn't find wget2. Several words
+    # list several packages, since one name can't equal two words
+    parts = PACKAGE_NAME.match(name)
+    return any(pattern.fullmatch(name) or (parts and pattern.fullmatch(parts['stem']))
+        for pattern in patterns)
+
+def keep_newest(matches):
+    # One package per stem, flavor and first version number, so php gives
+    # php-8.4.20 while jdk-17 and jdk-21 stay apart. As in pkg_add, the epoch
+    # (vN) decides first, then the version, then pN, where p0 beats none
+    newest = {}
+    for match in matches:
+        parts = PACKAGE_NAME.match(match[0])
+        if not parts:
+            newest[match[0]] = ((), match)
+            continue
+        key = (parts['stem'], parts['flavor'], re.match(r'\d+', parts['version'])[0])
+        rank = (int(parts['v'] or 0), version_order(parts['version']), int(parts['p'] or -1))
+        if key not in newest or rank > newest[key][0]:
+            newest[key] = (rank, match)
+    return [match for _, match in newest.values()]
+
 def search(release, arch, patterns, queries=None, show_sha=False, exact=False):
-    def package_matches(name, patterns, exact=False):
-        if not exact:
-            # Every word must match, as in pacman -Ss and dnf search
-            return all(pattern.search(name) for pattern in patterns)
-        # Exact: a word must equal the whole name (curl-8.22.0), the stem (curl),
-        # or the stem without a trailing major version (wget2 -> wget, gtk+3 -> gtk+).
-        # Several words list several packages, since one name can't equal two words
-        parts = PACKAGE_NAME.match(name)
-        candidates = {name}
-        if parts:
-            stem = parts['stem']
-            candidates |= {stem, re.sub(r'\d+$', '', stem)}
-        return any(pattern.fullmatch(candidate)
-            for pattern in patterns for candidate in candidates)
-    def keep_newest(matches):
-        # Keep one package per family and flavor, the one with the highest version.
-        # wget2 joins the family of wget only when wget is listed too, so unrelated
-        # names that end in digits (x264, x265) stay apart. On a tie the
-        # packages-stable entry wins, since it is read after packages
-        parsed = [(match, PACKAGE_NAME.match(match[0])) for match in matches]
-        stems = {parts['stem'] for _, parts in parsed if parts}
-        def family(stem):
-            base = re.sub(r'\d+$', '', stem)
-            return base if base in stems else stem
-        newest = {}
-        for match, parts in parsed:
-            if parts:
-                key = (family(parts['stem']), parts['flavor'])
-                rank = version_order(parts['version'])
-            else:
-                key, rank = match[0], []
-            if key not in newest or rank >= newest[key][0]:
-                newest[key] = (rank, match)
-        return [match for _, match in newest.values()]
 
     matches = []
     packages_as_suggestions = []
@@ -194,7 +186,8 @@ def search(release, arch, patterns, queries=None, show_sha=False, exact=False):
                     # the hash group stops before the trailing '=' padding
                     match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
                     # Every word must match, as in pacman -Ss and dnf search
-                    if match and package_matches(match.group(1), patterns, exact):
+                    if match and (exact_name(match.group(1), patterns) if exact
+                            else all(pattern.search(match.group(1)) for pattern in patterns)):
                         matches.append((match.group(1), label, match.group(2)))
                     if match:
                         packages_as_suggestions.append(match.group(1))
@@ -245,14 +238,21 @@ def main():
         epilog=f'''examples:
   0verbs.py curl                    packages whose name contains "curl"
   0verbs.py php curl 8.4            packages whose name contains every word
-  0verbs.py 'php|perl'              packages whose name contains either word
-  0verbs.py '^php-8\\.'              names matching a regular expression
   0verbs.py --sha256 curl           also show each package's SHA256 sum
-  0verbs.py --exact curl            show the exact package when searching
+  0verbs.py -e curl                 only the curl package, newest version
+  0verbs.py -e curl wget            the curl and the wget package
   0verbs.py --release 7.8 --arch amd64 curl
                                     search another release or architecture
   0verbs.py --update                re-download the package lists
   0verbs.py --list-releases         list the releases on the mirror
+
+regular expressions (a word with any of ^$*?()[]{{}}|\\ is one):
+  0verbs.py '^curl-.*'              names starting with curl-, so not curlftpfs
+  0verbs.py 'php|perl'              names containing php or perl
+  0verbs.py '^(php|perl)'           names starting with php or perl
+  0verbs.py '^php.*curl'            names starting with php, with curl later on
+  0verbs.py '^py3-.*yaml'           Python 3 modules about yaml
+  0verbs.py 'gtk\\+'                 a plain +, as in gtk+; \\ makes + ordinary
 
 Package lists are saved under {CACHE}.
 The mirror is read from {INSTALLURL}, or from
@@ -269,9 +269,9 @@ The mirror is read from {INSTALLURL}, or from
         help='package architecture to search, e.g. amd64, downloaded if needed'
         ' (default: this machine\'s, or the newest downloaded list\'s outside OpenBSD)')
     parser.add_argument('--list-releases', action='store_true', help='list available OpenBSD releases on the mirror')
-    parser.add_argument('--exact', action='store_true',
-        help='match whole package names instead of parts: curl finds curl-8.22.0'
-        ' but not curl-doc or libcurl. Several words list several packages')
+    parser.add_argument('-e', '--exact', action='store_true',
+        help='match whole package names instead of parts and show the newest version:'
+        ' curl finds curl-8.22.0 but not curl-doc or libcurl. Several words list several packages')
     args = parser.parse_intermixed_args()
 
     if args.list_releases:
