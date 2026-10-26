@@ -1,15 +1,35 @@
 diff --git a/0verbs.py b/0verbs.py
-index e7692e2..cc4c378 100644
+index 54a1c6f..df4f4c1 100644
 --- a/0verbs.py
 +++ b/0verbs.py
-@@ -232,8 +232,8 @@ The mirror is read from {INSTALLURL}, or from
+@@ -268,8 +268,8 @@ The mirror is read from {INSTALLURL}, or from
          download(*target, folder)
  
      if args.queries:
--        search(*target, patterns, queries=None, show_sha=args.sha256)
+-        search(*target, patterns, queries=None, show_sha=args.sha256, exact=args.exact)
 -        #search(*target, patterns, queries=args.queries, show_sha=args.sha256)
-+        #search(*target, patterns, queries=None, show_sha=args.sha256)
-+        search(*target, patterns, queries=args.queries, show_sha=args.sha256)
++        #search(*target, patterns, queries=None, show_sha=args.sha256, exact=args.exact)
++        search(*target, patterns, queries=args.queries, show_sha=args.sha256, exact=args.exact)
      elif not missing:
          sys.exit('ERROR: Please supply some package!')
  
+diff --git a/suggestPacks.diff b/suggestPacks.diff
+index d7c6be7..e69de29 100644
+--- a/suggestPacks.diff
++++ b/suggestPacks.diff
+@@ -1,15 +0,0 @@
+-diff --git a/0verbs.py b/0verbs.py
+-index e7692e2..cc4c378 100644
+---- a/0verbs.py
+-+++ b/0verbs.py
+-@@ -232,8 +232,8 @@ The mirror is read from {INSTALLURL}, or from
+-         download(*target, folder)
+- 
+-     if args.queries:
+--        search(*target, patterns, queries=None, show_sha=args.sha256)
+--        #search(*target, patterns, queries=args.queries, show_sha=args.sha256)
+-+        #search(*target, patterns, queries=None, show_sha=args.sha256)
+-+        search(*target, patterns, queries=args.queries, show_sha=args.sha256)
+-     elif not missing:
+-         sys.exit('ERROR: Please supply some package!')
+- 

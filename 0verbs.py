@@ -269,7 +269,7 @@ The mirror is read from {INSTALLURL}, or from
 
     if args.queries:
         search(*target, patterns, queries=None, show_sha=args.sha256, exact=args.exact)
-        #search(*target, patterns, queries=args.queries, show_sha=args.sha256)
+        #search(*target, patterns, queries=args.queries, show_sha=args.sha256, exact=args.exact)
     elif not missing:
         sys.exit('ERROR: Please supply some package!')
 
