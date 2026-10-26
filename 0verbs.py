@@ -147,43 +147,42 @@ REGEX_SYNTAX = set('^$*?()[]{}|\\')
 def word_pattern(word):
     return re.compile(word if REGEX_SYNTAX & set(word) else re.escape(word), re.IGNORECASE)
 
-def package_matches(name, patterns, exact=False):
-    if not exact:
-        # Every word must match, as in pacman -Ss and dnf search
-        return all(pattern.search(name) for pattern in patterns)
-    # Exact: a word must equal the whole name (curl-8.22.0), the stem (curl),
-    # or the stem without a trailing major version (wget2 -> wget, gtk+3 -> gtk+).
-    # Several words list several packages, since one name can't equal two words
-    parts = PACKAGE_NAME.match(name)
-    candidates = {name}
-    if parts:
-        stem = parts['stem']
-        candidates |= {stem, re.sub(r'\d+$', '', stem)}
-    return any(pattern.fullmatch(candidate)
-        for pattern in patterns for candidate in candidates)
-
-def keep_newest(matches):
-    # Keep one package per family and flavor, the one with the highest version.
-    # wget2 joins the family of wget only when wget is listed too, so unrelated
-    # names that end in digits (x264, x265) stay apart. On a tie the
-    # packages-stable entry wins, since it is read after packages
-    parsed = [(match, PACKAGE_NAME.match(match[0])) for match in matches]
-    stems = {parts['stem'] for _, parts in parsed if parts}
-    def family(stem):
-        base = re.sub(r'\d+$', '', stem)
-        return base if base in stems else stem
-    newest = {}
-    for match, parts in parsed:
-        if parts:
-            key = (family(parts['stem']), parts['flavor'])
-            rank = version_order(parts['version'])
-        else:
-            key, rank = match[0], []
-        if key not in newest or rank >= newest[key][0]:
-            newest[key] = (rank, match)
-    return [match for _, match in newest.values()]
-
 def search(release, arch, patterns, queries=None, show_sha=False, exact=False):
+    def package_matches(name, patterns, exact=False):
+        if not exact:
+            # Every word must match, as in pacman -Ss and dnf search
+            return all(pattern.search(name) for pattern in patterns)
+        # Exact: a word must equal the whole name (curl-8.22.0), the stem (curl),
+        # or the stem without a trailing major version (wget2 -> wget, gtk+3 -> gtk+).
+        # Several words list several packages, since one name can't equal two words
+        parts = PACKAGE_NAME.match(name)
+        candidates = {name}
+        if parts:
+            stem = parts['stem']
+            candidates |= {stem, re.sub(r'\d+$', '', stem)}
+        return any(pattern.fullmatch(candidate)
+            for pattern in patterns for candidate in candidates)
+    def keep_newest(matches):
+        # Keep one package per family and flavor, the one with the highest version.
+        # wget2 joins the family of wget only when wget is listed too, so unrelated
+        # names that end in digits (x264, x265) stay apart. On a tie the
+        # packages-stable entry wins, since it is read after packages
+        parsed = [(match, PACKAGE_NAME.match(match[0])) for match in matches]
+        stems = {parts['stem'] for _, parts in parsed if parts}
+        def family(stem):
+            base = re.sub(r'\d+$', '', stem)
+            return base if base in stems else stem
+        newest = {}
+        for match, parts in parsed:
+            if parts:
+                key = (family(parts['stem']), parts['flavor'])
+                rank = version_order(parts['version'])
+            else:
+                key, rank = match[0], []
+            if key not in newest or rank >= newest[key][0]:
+                newest[key] = (rank, match)
+        return [match for _, match in newest.values()]
+
     matches = []
     packages_as_suggestions = []
     for folder in FOLDERS:
