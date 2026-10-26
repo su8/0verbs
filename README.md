@@ -24,6 +24,9 @@ python3 0verbs.py '^php-8\.'
 # to list the package name and sha256 sum
 python3 0verbs.py --sha256 curl
 
+# to list the exact package, for example curl
+python3 0verbs.py --exact curl
+
 # re-download the package lists (e.g. after upgrading OpenBSD, or for new security updates)
 python3 0verbs.py --update
 

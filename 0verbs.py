@@ -69,6 +69,17 @@ def version_order(name):
 # part after a dash that starts with a digit; see packages-specs(7)
 PACKAGE_NAME = re.compile(r'(?P<stem>.+?)-(?P<version>\d[^-]*?)(?P<flavor>(?:-[^-]+)*)$')
 
+def package_matches(name, patterns, exact=False):
+    if not exact:
+        # Every word must match, as in pacman -Ss and dnf search
+        return all(pattern.search(name) for pattern in patterns)
+    # Exact: a word must equal the whole stem, or the whole name (curl-8.22.0).
+    # Several words list several packages, since one stem can't equal two words
+    parts = PACKAGE_NAME.match(name)
+    candidates = (name, parts['stem']) if parts else (name,)
+    return any(pattern.fullmatch(candidate)
+        for pattern in patterns for candidate in candidates)
+
 def hide_superseded(matches):
     # pkg_add installs the packages-stable update instead of the release package
     # it replaces, so hide a release package when an update with the same stem,
@@ -147,7 +158,7 @@ REGEX_SYNTAX = set('^$*?()[]{}|\\')
 def word_pattern(word):
     return re.compile(word if REGEX_SYNTAX & set(word) else re.escape(word), re.IGNORECASE)
 
-def search(release, arch, patterns, queries=None, show_sha=False):
+def search(release, arch, patterns, queries=None, show_sha=False, exact=False):
     matches = []
     packages_as_suggestions = []
     for folder in FOLDERS:
@@ -159,7 +170,7 @@ def search(release, arch, patterns, queries=None, show_sha=False):
                     # the hash group stops before the trailing '=' padding
                     match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
                     # Every word must match, as in pacman -Ss and dnf search
-                    if match and all(pattern.search(match.group(1)) for pattern in patterns):
+                    if match and package_matches(match.group(1), patterns, exact):
                         matches.append((match.group(1), label, match.group(2)))
                     if match:
                         packages_as_suggestions.append(match.group(1))
@@ -210,6 +221,7 @@ def main():
   0verbs.py 'php|perl'              packages whose name contains either word
   0verbs.py '^php-8\\.'              names matching a regular expression
   0verbs.py --sha256 curl           also show each package's SHA256 sum
+  0verbs.py --exact curl            show the exact package when searching
   0verbs.py --release 7.8 --arch amd64 curl
                                     search another release or architecture
   0verbs.py --update                re-download the package lists
@@ -230,6 +242,9 @@ The mirror is read from {INSTALLURL}, or from
         help='package architecture to search, e.g. amd64, downloaded if needed'
         ' (default: this machine\'s, or the newest downloaded list\'s outside OpenBSD)')
     parser.add_argument('--list-releases', action='store_true', help='list available OpenBSD releases on the mirror')
+    parser.add_argument('--exact', action='store_true',
+        help='match whole package names instead of parts: curl finds curl-8.22.0'
+        ' but not curl-doc or libcurl. Several words list several packages')
     args = parser.parse_intermixed_args()
 
     if args.list_releases:
@@ -249,7 +264,7 @@ The mirror is read from {INSTALLURL}, or from
         download(*target, folder)
 
     if args.queries:
-        search(*target, patterns, queries=None, show_sha=args.sha256)
+        search(*target, patterns, queries=None, show_sha=args.sha256, exact=args.exact)
         #search(*target, patterns, queries=args.queries, show_sha=args.sha256)
     elif not missing:
         sys.exit('ERROR: Please supply some package!')
