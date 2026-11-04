@@ -2,9 +2,135 @@
 
 ### 0verbs
 
-Download (local copy of the mirror's package list) and search for a OpenBSD/NetBSD package. No need to use the package searching (or set `PKG_PATH`) as it takes too long to list and find your query and you are required to have internet up and running. The program is not making a database from local ports tree programs. It creates database for the pre-compiled binaries that you will use with `pkg_add` to install the particular program that you have searched with `0verbs`.
+Search OpenBSD and NetBSD package lists from a local cache.
 
-Download this fellow and run it with the package you want. The first run downloads the mirror's small `SHA256` or `SHA512`/when on NetBSD package list, then searches it:
+`0verbs` downloads the package index for a release once, caches it, and then
+answers searches without touching the network. It understands the different
+index formats used by the two projects:
+
+* OpenBSD: `SHA256` files with base64 digests.
+* NetBSD: `SHA512.bz2` files with hex digests.
+
+## Build
+
+Requirements: a C++17 compiler, libcurl, and libbz2.
+
+```sh
+make -j8
+sudo make install
+```
+
+On OpenBSD the dependencies are available as `curl` and `bzip2`; on NetBSD
+install `curl` and `bzip2` from pkgsrc. A direct build is:
+
+```sh
+c++ -O2 -std=c++17 -o 0verbs 0verbs.cpp -lcurl -lbz2
+```
+
+## Usage
+
+```text
+0verbs [options] [package ...]
+```
+
+Every search word must occur in a package name. Words are case-insensitive.
+A word containing regex punctuation (`^$*?()[]{}|\`) is treated as a regular
+expression unless `-F` is given.
+
+Common examples:
+
+```sh
+0verbs firefox                     # search the current release
+0verbs -e php --newest             # exact package, newest patch of each line
+0verbs --os netbsd --json jdk      # machine-readable NetBSD results
+0verbs --list-releases             # show releases available on the mirror
+0verbs --sha256 --url firefox      # include digest and download URL
+0verbs --installed firefox         # mark locally installed packages
+0verbs --update                    # refresh the cached indexes
+0verbs --clean                     # remove the cache
+```
+
+### Options
+
+| Option | Meaning |
+| --- | --- |
+| `--os {openbsd,netbsd}` | Package universe to search (default: auto-detect). |
+| `--release RELEASE` | Release to search, e.g. `7.8`, `snapshots`, `10.0_2026Q3`. |
+| `--arch ARCH` | Package architecture, e.g. `amd64` or `x86_64`. |
+| `--list-releases` | List releases found on the mirror. |
+| `-u`, `--update` | Re-download the package indexes. |
+| `--offline` | Use only cached indexes; never fetch. |
+| `--mirror URL` | Override the package mirror. |
+| `--cache-dir DIR` | Override the cache directory. |
+| `--clean` | Remove the cache and exit. |
+| `--sha256`, `--sha512` | Show package digests (SHA256 on OpenBSD, SHA512 on NetBSD). |
+| `--url` | Show package download URLs. |
+| `-j`, `--json` | Print machine-readable JSON. |
+| `--limit N` | Show at most `N` results. |
+| `--installed` | Mark packages installed on this machine. |
+| `--installed-only` | Show only installed packages. |
+| `--newest` | Show only the newest version of each package line. |
+| `--max-age DAYS` | Warn when the cached index is older than `DAYS` (default 7; 0 disables). |
+| `--timeout SECONDS` | Network timeout (default 120). |
+| `-e`, `--exact` | Match whole package names/stems. |
+| `-F`, `--fixed-strings` | Treat search words as literal strings. |
+| `--no-suggest` | Disable “Did you mean?” suggestions. |
+| `-v`, `--verbose` | Print extra diagnostics. |
+| `-h`, `--help` | Show help. |
+| `--version` | Show the version. |
+
+## Cache
+
+The default cache directory is `$XDG_CACHE_HOME/0verbs` or
+`~/.cache/0verbs`. Layout:
+
+```text
+0verbs/openbsd/<release>/<packages|packages-stable>/<arch>/SHA256
+0verbs/netbsd/<release>/packages/<arch>/SHA512.bz2
+0verbs/netbsd/<release>/packages/<arch>/SHA512
+```
+
+`--clean` refuses to delete a directory unless it is the configured cache
+directory, lives beneath the default cache root, or is named `0verbs`.
+
+## JSON output
+
+`--json` writes an object to standard output:
+
+```json
+{
+  "os": "openbsd",
+  "release": "7.8",
+  "arch": "amd64",
+  "count": 1,
+  "packages": [
+    {
+      "name": "firefox-149.0",
+      "version": "149.0",
+      "flavor": null,
+      "hash_type": "sha256",
+      "hash": "...",
+      "url": "https://cdn.openbsd.org/pub/OpenBSD/7.8/packages/amd64/firefox-149.0.tgz",
+      "branch": null,
+      "installed": false
+    }
+  ]
+}
+```
+
+`--list-releases --json` prints a JSON array of release names. Progress and
+diagnostic messages are written to standard error, so stdout stays valid JSON.
+
+## Notes
+
+* OpenBSD SHA256 files store base64 digests; older hex-only parsing rejected
+  them. This version accepts both forms.
+* NetBSD architecture `amd64` is normalised to `x86_64`, and release names may
+  contain an uppercase quarter such as `10.0_2026Q3`.
+* Searches combine the OpenBSD `packages` and `packages-stable` indexes and
+  prefer the stable entry when the same package line appears in both.
+* Use `--offline` when the network is unavailable and the cache is populated.
+
 
 ```bash
 ###
@@ -74,7 +200,7 @@ MacOS brew install curl bzip2
 MacOS g++ -std=c++17 -O2 -o 0verbs 0verbs.cpp I$(brew --prefix curl)/include -I$(brew --prefix bzip2)/include -L$(brew --prefix curl)/lib -L$(brew --prefix bzip2)/lib -lcurl -lbz2
 ```
 
-To compile the `0verbs.cpp`L
+To compile the `0verbs.cpp`:
 
 ```bash
 make -j8 # 8 cores/threads to use in parallel compile
