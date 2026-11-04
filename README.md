@@ -12,7 +12,6 @@ Download this fellow and run it with the package you want. The first run downloa
 ###
 python3 0verbs.py --os openbsd
 python3 0verbs.py --os netbsd
-python3 0verbs.py --os netbsd --sha512 '^php'
 
 python3 0verbs.py curl
 
@@ -34,6 +33,7 @@ python3 0verbs.py 'gtk\+'         # a plain +, as in gtk+; \ makes + ordinary
 
 # to list the package name and sha256 sum, sha256 is meant for OpenBSD
 python3 0verbs.py --sha256 curl
+python3 0verbs.py --os netbsd --sha512 '^php'
 
 # to list the exact package, newest version: curl, but not curl-doc or libcurl
 python3 0verbs.py -e curl            # or --exact curl
@@ -76,16 +76,6 @@ ss() {
 
 # and use it
 ss 'curl'
-```
-
----
-
-### Adding package suggestions for misspelt string such as firfox
-
-Copy and paste the following snippet and you are ready to rock:
-
-```bash
-git apply suggestPackages.diff
 ```
 
 ---
