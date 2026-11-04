@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright 10/23/2026 https://github.com/su8/0verbs
+# Copyright 11/04/2026 10/23/2026 https://github.com/su8/0verbs
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2 of the License, or
@@ -17,7 +17,6 @@
 # MA 02110-1301, USA.
 #
 import argparse
-import glob
 import os
 import platform
 import re
@@ -27,27 +26,31 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 from difflib import get_close_matches
 
-# Each download is kept as <release>/<folder>/<arch>/SHA256, the same path as on the mirror
-CACHE = os.path.join(os.path.expanduser('~'), '.cache', '0verbs')
-# Like pkg_add(1), also look in packages-stable, where a release's updates go
-FOLDERS = ('packages', 'packages-stable')
+CACHE_ROOT = os.path.join(os.path.expanduser('~'), '.cache', '0verbs')
+
+# ---------------------------------------------------------------------------
+# Per-OS configuration
+# ---------------------------------------------------------------------------
+#
+# "openbsd": mirrors publish a plain-text SHA256 list per
+#            <release>/<folder>/<arch>/SHA256, where folder is packages
+#            or packages-stable. installurl(5) is honoured.
+#
+# "netbsd" : mirrors publish <arch>/<release>/SHA512.bz2, a bzip2-compressed
+#            list. The raw .bz2 is kept as SHA512.bz2 and a cleaned-up
+#            (no "All/" prefix) text list is written to SHA512.
+#
+# Both formats are parsed by search(); only the download/decompress step
+# and the release discovery differ.
+
 INSTALLURL = '/etc/installurl'
-DEFAULT_MIRROR = 'https://cdn.openbsd.org/pub/OpenBSD'
+OPENBSD_DEFAULT_MIRROR = 'https://cdn.openbsd.org/pub/OpenBSD'
+OPENBSD_FOLDERS = ('packages', 'packages-stable')
 
-def mirror():
-    # Use the same mirror as pkg_add(1): the first line of installurl(5)
-    try:
-        with open(INSTALLURL) as installurl:
-            url = installurl.readline().strip().rstrip('/')
-    except OSError:
-        url = ''
-    return url or DEFAULT_MIRROR
+NETBSD_DEFAULT_MIRROR = 'https://cdn.netbsd.org/pub/pkgsrc/packages/NetBSD'
 
-MIRROR = mirror()
-
-# platform.machine() names (Linux, macOS and OpenBSD's `uname -m`)
-# mapped to OpenBSD package architectures, i.e. what `machine -a` prints
-ARCH_NAMES = {
+# platform.machine() -> package arch, per OS family
+OPENBSD_ARCH_NAMES = {
     'x86_64': 'amd64', 'amd64': 'amd64',
     'arm64': 'aarch64', 'aarch64': 'aarch64',
     'i386': 'i386', 'i486': 'i386', 'i586': 'i386', 'i686': 'i386', 'x86': 'i386',
@@ -60,170 +63,299 @@ ARCH_NAMES = {
     'sparc64': 'sparc64',
     'mips64': 'mips64',
 }
+NETBSD_ARCH_NAMES = {
+    'x86_64': 'amd64', 'amd64': 'amd64',
+    'i386': 'i386', 'i486': 'i386', 'i586': 'i386', 'i686': 'i386', 'x86': 'i386',
+    'arm64': 'aarch64', 'aarch64': 'aarch64',
+    'armv7l': 'earmv7hf', 'armv7': 'earmv7hf',
+    'macppc': 'macppc',
+    'riscv64': 'riscv64',
+    'sparc64': 'sparc64',
+    'mips64': 'mips64',
+}
 
-def version_order(name):
-    # Compare digit runs as numbers, so 10.0 sorts after 7.8 and curl-8.10.1 after curl-8.9.0
-    return [int(part) if part.isdigit() else part for part in re.split(r'(\d+)', name)]
-
-# OpenBSD package names are stem-version[-flavor], the version being the first
-# part after a dash that starts with a digit and ending in an optional pN
-# (packaging fix) and vN (epoch); see packages-specs(7)
-PACKAGE_NAME = re.compile(r'(?P<stem>.+?)-(?P<version>\d[^-]*?)(?:p(?P<p>\d+))?(?:v(?P<v>\d+))?'
+# OpenBSD package name: stem-version[-flavor], version may end in pN (pkgfix)
+# and vN (epoch); see packages-specs(7). NetBSD pkg names are usually
+# stem-version.tgz with no pN/vN suffix, but the regex is harmless there.
+PACKAGE_NAME = re.compile(
+    r'(?P<stem>.+?)-(?P<version>\d[^-]*?)(?:p(?P<p>\d+))?(?:v(?P<v>\d+))?'
     r'(?P<flavor>(?:-[^-]+)*)$')
 
-def hide_superseded(matches):
-    # pkg_add installs the packages-stable update instead of the release package
-    # it replaces, so hide a release package when an update with the same stem,
-    # flavor and first version number is listed too. The first number keeps
-    # side-by-side versions apart: jdk-21 stays when only jdk-17 was updated
-    def line(name):
-        parts = PACKAGE_NAME.match(name)
-        return parts and (parts['stem'], parts['flavor'], re.match(r'\d+', parts['version'])[0])
-    updated = {line(name) for name, label, _ in matches if label}
-    return [match for match in matches
-        if match[1] or not line(match[0]) or line(match[0]) not in updated]
+REGEX_SYNTAX = set('^$*?()[]{}|\\')
+
+
+# ---------------------------------------------------------------------------
+# Generic helpers
+# ---------------------------------------------------------------------------
+
+def version_order(name):
+    return [int(part) if part.isdigit() else part
+            for part in re.split(r'(\d+)', name)]
+
+
+def detect_os():
+    if platform.system() == 'OpenBSD':
+        return 'openbsd'
+    return 'netbsd'
+
 
 def fetch(url, announce=False, missing_ok=False):
     if announce:
         print(f'Downloading {url} ...', end=' ', flush=True)
     try:
         with urlopen(url, timeout=120) as response:
-            return response.read().decode('utf-8')
+            return response.read()
     except HTTPError as err:
         if missing_ok and err.code == 404:
-            return ''
+            return b''
         error = f'ERROR: {err} for {url}'
         if err.code == 404:
-            error += (f'\nUse --release and/or --arch to pick a release and architecture'
-                f' that exist on {MIRROR}')
+            error += (f'\nUse --release and/or --arch to pick a release and '
+                      f'architecture that exist on the mirror')
     except OSError as err:
         error = f'ERROR: could not download {url}: {err}'
     if announce:
         print()
     sys.exit(error)
 
-def mirror_releases():
-    listing = fetch(f'{MIRROR}/')
+
+def local_list(flavour, release, arch, folder='packages', filename='SHA256'):
+    return os.path.join(CACHE_ROOT, flavour, release, folder, arch, filename)
+
+
+# ---------------------------------------------------------------------------
+# OpenBSD backend
+# ---------------------------------------------------------------------------
+
+def openbsd_mirror():
+    try:
+        with open(INSTALLURL) as fh:
+            url = fh.readline().strip().rstrip('/')
+    except OSError:
+        url = ''
+    return url or OPENBSD_DEFAULT_MIRROR
+
+
+def openbsd_mirror_releases(mirror):
+    listing = fetch(f'{mirror}/').decode('utf-8', errors='ignore')
     return sorted(re.findall(r'href="(\d+\.\d+)/"', listing), key=version_order)
 
-def default_release():
-    # Packages only install on the release they were built for
+
+def openbsd_default_release(mirror):
     if platform.system() == 'OpenBSD':
         return platform.release()
-    return mirror_releases()[-1]
+    releases = openbsd_mirror_releases(mirror)
+    if not releases:
+        sys.exit(f'ERROR: could not list releases at {mirror}/')
+    return releases[-1]
 
-def default_arch():
+
+def openbsd_default_arch():
     machine = platform.machine().lower()
-    return ARCH_NAMES.get(machine, machine)
+    return OPENBSD_ARCH_NAMES.get(machine, machine)
 
-def local_list(release, arch, folder='packages'):
-    return os.path.join(CACHE, release, folder, arch, 'SHA256')
 
-def pick_list(release, arch, update):
-    # On OpenBSD the installed release is the only one pkg_add(1) can use;
-    # elsewhere prefer the newest downloaded list over asking the mirror
-    if release is None and not update and platform.system() != 'OpenBSD':
-        lists = sorted(glob.glob(local_list('*', arch or '*')), key=os.path.getmtime)
-        if lists:
-            cached_release, _, cached_arch, _ = os.path.relpath(lists[-1], CACHE).split(os.sep)
-            return cached_release, cached_arch
-    return release or default_release(), arch or default_arch()
+def openbsd_download(mirror, release, arch, folder):
+    url = f'{mirror}/{release}/{folder}/{arch}/SHA256'
+    db = local_list('openbsd', release, arch, folder)
+    data = fetch(url, announce=True, missing_ok=folder != 'packages')
+    if not data and folder == 'packages':
+        sys.exit(f'ERROR: empty listing for {url}')
+    os.makedirs(os.path.dirname(db), exist_ok=True)
+    tmp = f'{db}.tmp'
+    with open(tmp, 'wb') as fh:
+        fh.write(data)
+    os.replace(tmp, db)
+    print(f'saved to {db}' if data else 'no updates yet')
 
-def download(release, arch, folder):
-    url = f'{MIRROR}/{release}/{folder}/{arch}/SHA256'
-    database = local_list(release, arch, folder)
-    # A release has no packages-stable until its first update
-    packages = fetch(url, announce=True, missing_ok=folder != 'packages')
-    os.makedirs(os.path.dirname(database), exist_ok=True)
-    # Write a temporary file first so an interrupted run never leaves half a list
-    with open(f'{database}.tmp', 'w') as db:
-        db.write(packages)
-    os.replace(f'{database}.tmp', database)
-    print(f'saved to {database}' if packages else 'no updates yet')
 
-# A word using any of these is a regular expression, like in pacman -Ss.
-# Package names only ever contain + and . of the others, so gtk+, c++ and
-# 8.4 keep matching as plain text.
-REGEX_SYNTAX = set('^$*?()[]{}|\\')
+def openbsd_parse(db_path):
+    """Yield (name, sha256) from a packages SHA256 file."""
+    try:
+        with open(db_path, errors='replace') as fh:
+            for line in fh:
+                m = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
+                if m:
+                    yield m.group(1), m.group(2)
+    except FileNotFoundError:
+        return
+
+
+# ---------------------------------------------------------------------------
+# NetBSD backend
+# ---------------------------------------------------------------------------
+
+def netbsd_mirror():
+    return NETBSD_DEFAULT_MIRROR
+
+
+def netbsd_mirror_releases(mirror, arch):
+    try:
+        listing = fetch(f'{mirror}/{arch}/').decode('utf-8', errors='ignore')
+    except SystemExit:
+        return []
+    return sorted(
+        re.findall(r'href="(\d+\.\d+_[^/"]+)/"', listing), key=version_order)
+
+
+def netbsd_default_release(mirror, arch):
+    releases = netbsd_mirror_releases(mirror, arch)
+    if not releases:
+        sys.exit(f'ERROR: could not list releases for arch {arch} at '
+                 f'{mirror}/{arch}/')
+    return releases[-1]
+
+
+def netbsd_default_arch():
+    machine = platform.machine().lower()
+    return NETBSD_ARCH_NAMES.get(machine, machine)
+
+
+def netbsd_download(mirror, release, arch):
+    url = f'{mirror}/{arch}/{release}/SHA512.bz2'
+    raw_db = local_list('netbsd', release, arch, 'packages', 'SHA512.bz2')
+    clean_db = local_list('netbsd', release, arch, 'packages', 'SHA512')
+    data = fetch(url, announce=True)
+    try:
+        import bz2
+        text = bz2.decompress(data)
+    except ImportError:
+        import subprocess
+        proc = subprocess.run(['bzip2', '-dc'], input=data,
+                              capture_output=True, check=True)
+        text = proc.stdout
+    os.makedirs(os.path.dirname(raw_db), exist_ok=True)
+    tmp_raw = f'{raw_db}.tmp'
+    with open(tmp_raw, 'wb') as fh:
+        fh.write(data)
+    os.replace(tmp_raw, raw_db)
+    # Strip "All/" prefix from every package path, if present.
+    out_lines = []
+    for line in text.decode('utf-8', errors='replace').splitlines(True):
+        # Match e.g. "SHA512 (All/curl-8.10.1.tgz) = hash"
+        m = re.match(r'(SHA512 \()All/(.+\.tgz\) = .*)', line)
+        if m:
+            out_lines.append(m.group(1) + m.group(2) + '\n')
+        else:
+            out_lines.append(line)
+    tmp_clean = f'{clean_db}.tmp'
+    with open(tmp_clean, 'w', encoding='utf-8') as fh:
+        fh.writelines(out_lines)
+    os.replace(tmp_clean, clean_db)
+    print(f'saved raw to {raw_db}')
+    print(f'saved cleaned list to {clean_db}')
+
+
+def netbsd_parse(db_path):
+    """Yield (name, sha512) from a NetBSD SHA512 file (All/ already stripped)."""
+    try:
+        with open(db_path, errors='replace') as fh:
+            for line in fh:
+                m = re.search(r'SHA512 \((.+?)\.tgz\) = ([A-Fa-f0-9]+)', line)
+                if m:
+                    yield m.group(1), m.group(2)
+    except FileNotFoundError:
+        return
+
+
+# ---------------------------------------------------------------------------
+# Shared search / output
+# ---------------------------------------------------------------------------
 
 def word_pattern(word):
-    return re.compile(word if REGEX_SYNTAX & set(word) else re.escape(word), re.IGNORECASE)
+    return re.compile(word if REGEX_SYNTAX & set(word) else re.escape(word),
+                      re.IGNORECASE)
+
 
 def exact_name(name, patterns):
-    # --exact: a word must equal the whole name (curl-8.22.0) or its stem (curl),
-    # so curl doesn't find curl-doc and wget doesn't find wget2. Several words
-    # list several packages, since one name can't equal two words
     parts = PACKAGE_NAME.match(name)
     return any(pattern.fullmatch(name) or (parts and pattern.fullmatch(parts['stem']))
-        for pattern in patterns)
+               for pattern in patterns)
+
 
 def keep_newest(matches):
-    # One package per stem, flavor and first version number, so php gives
-    # php-8.4.20 while jdk-17 and jdk-21 stay apart. As in pkg_add, the epoch
-    # (vN) decides first, then the version, then pN, where p0 beats none
     newest = {}
     for match in matches:
         parts = PACKAGE_NAME.match(match[0])
         if not parts:
             newest[match[0]] = ((), match)
             continue
-        key = (parts['stem'], parts['flavor'], re.match(r'\d+', parts['version'])[0])
-        rank = (int(parts['v'] or 0), version_order(parts['version']), int(parts['p'] or -1))
+        key = (parts['stem'], parts['flavor'],
+               re.match(r'\d+', parts['version'])[0])
+        rank = (int(parts['v'] or 0), version_order(parts['version']),
+                int(parts['p'] or -1))
         if key not in newest or rank > newest[key][0]:
             newest[key] = (rank, match)
     return [match for _, match in newest.values()]
 
-def search(release, arch, patterns, queries=None, show_sha=False, exact=False):
 
+def hide_superseded(matches):
+    def line(name):
+        parts = PACKAGE_NAME.match(name)
+        return parts and (parts['stem'], parts['flavor'],
+                          re.match(r'\d+', parts['version'])[0])
+    updated = {line(name) for name, label, _ in matches if label}
+    return [m for m in matches
+            if m[1] or not line(m[0]) or line(m[0]) not in updated]
+
+
+def search(sources, patterns, queries=None, show_sha=False, exact=False,
+           age_paths=None, hash_label='SHA256'):
+    """
+    sources : list of (label, iterable_of_(name, hash))
+    """
     matches = []
-    packages_as_suggestions = []
-    for folder in FOLDERS:
-        label = ' (stable)' if folder == 'packages-stable' else ''
-        try:
-            with open(local_list(release, arch, folder)) as db:
-                for line in db:
-                    # SHA256 (curl-8.22.0.tgz) = <base64 hash>=
-                    # the hash group stops before the trailing '=' padding
-                    match = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
-                    # Every word must match, as in pacman -Ss and dnf search
-                    if match and (exact_name(match.group(1), patterns) if exact
-                            else all(pattern.search(match.group(1)) for pattern in patterns)):
-                        matches.append((match.group(1), label, match.group(2)))
-                    if match:
-                        packages_as_suggestions.append(match.group(1))
-        except FileNotFoundError:
-            pass
-    # If suggestions patch is applied try to suggests misspelt query
+    suggestions_pool = []
+    for label, items in sources:
+        for name, sha in items:
+            suggestions_pool.append(name)
+            hit = (exact_name(name, patterns) if exact
+                   else all(p.search(name) for p in patterns))
+            if hit:
+                matches.append((name, label, sha))
+
     if not matches and queries and len(queries) == 1:
-        suggestions = get_close_matches(queries[0], packages_as_suggestions, n=5, cutoff=0.4)
+        suggestions = get_close_matches(queries[0], suggestions_pool,
+                                        n=5, cutoff=0.4)
         if suggestions:
             print('\nDid you mean?')
             for pkg in suggestions:
                 print(f'  {pkg}')
             return
+
     matches = hide_superseded(matches)
-    # --exact is for looking up one package, so it shows only the latest version
     if exact:
         matches = keep_newest(matches)
-    # Name first, then version: wget before wget2, curl-8.9.0 before curl-8.10.1
+
     def order(match):
-        return re.split(r'-(?=\d)', match[0], maxsplit=1)[0], version_order(match[0])
-    for package, label, sha256 in sorted(matches, key=order):
+        return (re.split(r'-(?=\d)', match[0], maxsplit=1)[0],
+                version_order(match[0]))
+
+    for package, label, sha in sorted(matches, key=order):
         if show_sha:
             print(f'Package: {package}{label}')
-            print(f'SHA256: {sha256}')
+            print(f'{hash_label}: {sha}')
         else:
             print(f'{package}{label}')
+
     if not matches:
         print('No matches found.', file=sys.stderr)
-    # packages never changes after a release, but packages-stable keeps growing
-    days = (time.time() - os.path.getmtime(local_list(release, arch, 'packages-stable'))) / 86400
-    if days > 7:
-        print(f'Note: the updates list is {days:.0f} days old, run with --update for newer ones',
-            file=sys.stderr)
+
+    if age_paths:
+        newest = max((os.path.getmtime(p) for p in age_paths if os.path.exists(p)),
+                     default=0)
+        if newest:
+            days = (time.time() - newest) / 86400
+            if days > 7:
+                print(f'Note: the list is {days:.0f} days old, run with '
+                      f'--update for newer ones', file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
 
 def name_matching(pattern, example):
-    # --release and --arch become cache directories, so allow only plain names
     def check(value):
         value = value.lower()
         if not re.fullmatch(pattern, value):
@@ -231,70 +363,129 @@ def name_matching(pattern, example):
         return value
     return check
 
-def main():
+
+def build_parser(prog):
     parser = argparse.ArgumentParser(
-        description='Search the OpenBSD package list from a local database.',
+        prog=prog,
+        description='Search OpenBSD and NetBSD package lists from a local '
+                    'database.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f'''examples:
-  0verbs.py curl                    packages whose name contains "curl"
-  0verbs.py php curl 8.4            packages whose name contains every word
-  0verbs.py --sha256 curl           also show each package's SHA256 sum
-  0verbs.py -e curl                 only the curl package, newest version
-  0verbs.py -e curl wget            the curl and the wget package
-  0verbs.py --release 7.8 --arch amd64 curl
-                                    search another release or architecture
-  0verbs.py --update                re-download the package lists
-  0verbs.py --list-releases         list the releases on the mirror
+  {prog} curl                     packages whose name contains "curl"
+  {prog} php curl 8.4             packages whose name contains every word
+  {prog} --sha256 curl            also show each package's SHA256 sum (OpenBSD)
+  {prog} --sha512 curl            also show each package's SHA512 sum (NetBSD)
+  {prog} -e curl                  only the curl package, newest version
+  {prog} -e curl wget             the curl and the wget package
+  {prog} --os netbsd --release 11.0_2026Q3 --arch amd64 curl
+  {prog} --os openbsd --release 7.8 --arch amd64 curl
+  {prog} --update                 re-download the package lists
+  {prog} --list-releases          list releases on the mirror
 
-regular expressions (a word with any of ^$*?()[]{{}}|\\ is one):
-  0verbs.py '^curl-.*'              names starting with curl-, so not curlftpfs
-  0verbs.py 'php|perl'              names containing php or perl
-  0verbs.py '^(php|perl)'           names starting with php or perl
-  0verbs.py '^php.*curl'            names starting with php, with curl later on
-  0verbs.py '^py3-.*yaml'           Python 3 modules about yaml
-  0verbs.py 'gtk\\+'                 a plain +, as in gtk+; \\ makes + ordinary
+Package lists are saved under {CACHE_ROOT}.
+OpenBSD mirrors come from {INSTALLURL} (or {OPENBSD_DEFAULT_MIRROR}).
+NetBSD mirrors come from {NETBSD_DEFAULT_MIRROR}.
+NetBSD keeps the raw SHA512.bz2 and a cleaned SHA512 (no "All/" prefix).''')
 
-Package lists are saved under {CACHE}.
-The mirror is read from {INSTALLURL}, or from
-{DEFAULT_MIRROR} if it is missing.''')
     parser.add_argument('queries', nargs='*', metavar='package',
-        help='words to search for, case-insensitive; a package must contain all of them.'
-        ' A word with any of ^$*?()[]{}|\\ is a regular expression')
-    parser.add_argument('--sha256', action='store_true', help='also show each package\'s SHA256 sum')
-    parser.add_argument('--update', action='store_true', help='re-download the package lists')
-    parser.add_argument('--release', type=name_matching(r'\d+\.\d+|snapshots', '7.8 or snapshots'),
-        help='OpenBSD release to search, e.g. 7.8, downloaded if needed (default: the installed'
-        ' release on OpenBSD; elsewhere the newest downloaded list, or the latest release)')
-    parser.add_argument('--arch', type=name_matching(r'[a-z0-9]+', 'amd64'),
-        help='package architecture to search, e.g. amd64, downloaded if needed'
-        ' (default: this machine\'s, or the newest downloaded list\'s outside OpenBSD)')
-    parser.add_argument('--list-releases', action='store_true', help='list available OpenBSD releases on the mirror')
+        help='words to search for, case-insensitive; a package must contain '
+             'all of them. A word with any of ^$*?()[]{}|\\ is a regular '
+             'expression')
+    parser.add_argument('--os', choices=('openbsd', 'netbsd'),
+        help='which package universe to search (default: auto-detect)')
+    parser.add_argument('--sha256', action='store_true',
+        help='also show each package\'s SHA256 sum (OpenBSD lists)')
+    parser.add_argument('--sha512', action='store_true',
+        help='also show each package\'s SHA512 sum (NetBSD lists)')
+    parser.add_argument('--update', action='store_true',
+        help='re-download the package lists')
+    parser.add_argument('--release',
+        type=name_matching(r'\d+\.\d+(_[a-z0-9q]+)?|snapshots',
+                           '7.8, snapshots or 11.0_2026Q3'),
+        help='release to search, downloaded if needed')
+    parser.add_argument('--arch',
+        type=name_matching(r'[a-z0-9]+', 'amd64'),
+        help='package architecture to search, downloaded if needed')
+    parser.add_argument('--list-releases', action='store_true',
+        help='list available releases on the mirror')
     parser.add_argument('-e', '--exact', action='store_true',
-        help='match whole package names instead of parts and show the newest version:'
-        ' curl finds curl-8.22.0 but not curl-doc or libcurl. Several words list several packages')
-    args = parser.parse_intermixed_args()
+        help='match whole package names instead of parts and show the '
+             'newest version')
+    return parser
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def run_openbsd(args, parser):
+    mirror = openbsd_mirror()
+    release = args.release or openbsd_default_release(mirror)
+    arch = args.arch or openbsd_default_arch()
 
     if args.list_releases:
-        print(*mirror_releases(), sep='\n')
+        print(*openbsd_mirror_releases(mirror), sep='\n')
         return
 
-    try:
-        patterns = [word_pattern(word) for word in args.queries]
-    except re.error as err:
-        parser.error(f'invalid regular expression {err.pattern!r}: {err}')
-
-    target = pick_list(args.release, args.arch, args.update)
-    # Fetch only what is missing, so a list left out by a failed run is filled in
-    missing = [folder for folder in FOLDERS
-        if args.update or not os.path.isfile(local_list(*target, folder))]
+    missing = [folder for folder in OPENBSD_FOLDERS
+               if args.update
+               or not os.path.isfile(local_list('openbsd', release, arch, folder))]
     for folder in missing:
-        download(*target, folder)
+        openbsd_download(mirror, release, arch, folder)
 
     if args.queries:
-        search(*target, patterns, queries=None, show_sha=args.sha256, exact=args.exact)
-        #search(*target, patterns, queries=args.queries, show_sha=args.sha256, exact=args.exact)
+        patterns = [word_pattern(w) for w in args.queries]
+        sources = []
+        for folder in OPENBSD_FOLDERS:
+            label = ' (stable)' if folder == 'packages-stable' else ''
+            db = local_list('openbsd', release, arch, folder)
+            sources.append((label, openbsd_parse(db)))
+        search(sources, patterns, queries=args.queries,
+               show_sha=args.sha256,
+               exact=args.exact,
+               age_paths=[local_list('openbsd', release, arch, 'packages-stable')],
+               hash_label='SHA256')
     elif not missing:
         sys.exit('ERROR: Please supply some package!')
+
+
+def run_netbsd(args, parser):
+    mirror = netbsd_mirror()
+    arch = args.arch or netbsd_default_arch()
+
+    if args.list_releases:
+        print(*netbsd_mirror_releases(mirror, arch), sep='\n')
+        return
+
+    release = args.release or netbsd_default_release(mirror, arch)
+    db = local_list('netbsd', release, arch, 'packages', 'SHA512')
+
+    if args.update or not os.path.isfile(db):
+        netbsd_download(mirror, release, arch)
+
+    if args.queries:
+        patterns = [word_pattern(w) for w in args.queries]
+        sources = [('', netbsd_parse(db))]
+        search(sources, patterns, queries=args.queries,
+               show_sha=args.sha512,
+               exact=args.exact,
+               age_paths=[db],
+               hash_label='SHA512')
+    elif not args.update:
+        sys.exit('ERROR: Please supply some package!')
+
+
+def main():
+    prog = os.path.basename(sys.argv[0])
+    parser = build_parser(prog)
+    args = parser.parse_intermixed_args()
+
+    target = args.os or detect_os()
+    if target == 'openbsd':
+        run_openbsd(args, parser)
+    else:
+        run_netbsd(args, parser)
+
 
 if __name__ == '__main__':
     main()
