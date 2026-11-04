@@ -58,7 +58,7 @@ pkg_info -Q curl
 
 ### Trying it from macOS/Linux/other BSD
 
-Outside OpenBSD/NetbSD the script downloads the latest release and maps your CPU to the matching OpenBSD architecture (Apple Silicon -> `aarch64`, Intel -> `amd64`). Pick another release or architecture with `--release` and `--arch`:
+Outside OpenBSD/NetbSD the script downloads the latest release and maps your CPU to the matching OpenBSD/NetBSD architecture (Apple Silicon -> `aarch64`, Intel -> `amd64`). Pick another release or architecture with `--release` and `--arch`:
 
 ```bash
 python3 0verbs.py --os openbsd --release 7.8 --arch amd64 'curl'
