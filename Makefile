@@ -17,7 +17,7 @@
 CFLAGS+=-g2 -Wall -Wextra -O2 -std=c++20 -D_DEFAULT_SOURCE -pipe -pedantic -Wundef -Wshadow -W -Wwrite-strings -Wcast-align -Wstrict-overflow=5 -Wconversion -Wpointer-arith -Wformat=2 -Wsign-compare -Wendif-labels -Wredundant-decls -Winit-self
 LDFLAGS+=-lcurl -lbz2
 PACKAGE=0verbs
-PROG=main.cpp
+PROG=0verbs.cpp
 
 all:
 	$(CXX) -o $(PACKAGE) $(PROG) $(CFLAGS) $(LDFLAGS)
