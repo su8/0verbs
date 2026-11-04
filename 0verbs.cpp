@@ -1213,7 +1213,6 @@ struct Options {
     bool list_releases = false;
     bool exact = false;
     bool json = false;
-    bool offline = false;
     bool verbose = false;
     bool installed = false;
     bool installed_only = false;
@@ -1244,6 +1243,8 @@ static void print_help(const std::string& prog) {
     std::cout <<
         "usage: " << prog << " [options] [package ...]\n\n"
         "Search OpenBSD and NetBSD package lists from a local cache.\n\n"
+        "Cached lists are used when available.  The network is contacted only\n"
+        "when no cache exists or when --update is given.\n\n"
         "positional arguments:\n"
         "  package                 words to search for, case-insensitive; a\n"
         "                          package must contain all of them. A word with\n"
@@ -1254,11 +1255,10 @@ static void print_help(const std::string& prog) {
         "  --version               show the version and exit\n"
         "  --os {openbsd,netbsd}   which package universe to search\n"
         "                          (default: auto-detect)\n"
-        "  --release RELEASE       release to search, downloaded if needed\n"
+        "  --release RELEASE       release to search; fetched if not cached\n"
         "  --arch ARCH             package architecture, downloaded if needed\n"
-        "  --list-releases         list available releases on the mirror\n"
-        "  -u, --update            re-download the package lists\n"
-        "  --offline               use only cached lists; never fetch\n"
+        "  --list-releases         list releases (cached unless --update)\n"
+        "  -u, --update            refresh cached package lists from the mirror\n"
         "  --mirror URL            override the package mirror\n"
         "  --cache-dir DIR         override the cache directory\n"
         "  --clean                 remove the cache and exit\n"
@@ -1402,8 +1402,6 @@ static Options parse_args(int argc, char** argv, const std::string& prog) {
             }
         } else if (arg == "--list-releases") {
             a.list_releases = true;
-        } else if (arg == "--offline") {
-            a.offline = true;
         } else if (arg == "-e" || arg == "--exact") {
             a.exact = true;
         } else if (arg == "-j" || arg == "--json") {
@@ -1520,14 +1518,8 @@ static int run_openbsd(const Options& opt) {
 
     if (opt.list_releases) {
         std::vector<std::string> releases;
-        if (opt.offline) {
-            releases = cached_releases("openbsd", arch);
-            if (releases.empty()) {
-                std::cerr << "ERROR: no cached releases for " << arch
-                          << " under " << g_cache_root << "\n";
-                return 1;
-            }
-        } else {
+        if (!opt.update) releases = cached_releases("openbsd", arch);
+        if (releases.empty()) {
             std::string error;
             if (!openbsd_mirror_releases(mirror, opt.timeout, releases, error)) {
                 std::cerr << "ERROR: " << error << "\n";
@@ -1538,18 +1530,16 @@ static int run_openbsd(const Options& opt) {
         return 0;
     }
 
+    if (opt.queries.empty() && !opt.update) {
+        std::cerr << "ERROR: Please supply some package!\n";
+        return 1;
+    }
+
     std::string release = opt.release;
     if (release.empty()) {
-        if (opt.offline) {
-            release = latest_cached_release("openbsd", arch);
-            if (release.empty()) {
-                std::cerr << "ERROR: no cached OpenBSD release for " << arch
-                          << "; use --release or run without --offline\n";
-                return 1;
-            }
-        } else if (!openbsd_default_release(mirror, opt.timeout, release)) {
+        if (!opt.update) release = latest_cached_release("openbsd", arch);
+        if (release.empty() && !openbsd_default_release(mirror, opt.timeout, release))
             return 1;
-        }
     }
 
     std::vector<std::string> need;
@@ -1558,25 +1548,12 @@ static int run_openbsd(const Options& opt) {
             need.push_back(folder);
     }
 
-    if (opt.offline) {
-        if (!file_exists(local_list("openbsd", release, arch, "packages"))) {
-            std::cerr << "ERROR: no cached package list at "
-                      << local_list("openbsd", release, arch, "packages")
-                      << "; run without --offline\n";
+    for (const auto& folder : need) {
+        if (!openbsd_download(mirror, release, arch, folder, opt.timeout))
             return 1;
-        }
-    } else {
-        for (const auto& folder : need) {
-            if (!openbsd_download(mirror, release, arch, folder, opt.timeout))
-                return 1;
-        }
     }
 
-    if (opt.queries.empty()) {
-        if (opt.update) return 0;
-        std::cerr << "ERROR: Please supply some package!\n";
-        return 1;
-    }
+    if (opt.queries.empty()) return 0;  // --update without a search
 
     std::vector<std::regex> patterns;
     for (const auto& word : opt.queries) {
@@ -1640,14 +1617,8 @@ static int run_netbsd(const Options& opt) {
 
     if (opt.list_releases) {
         std::vector<std::string> releases;
-        if (opt.offline) {
-            releases = cached_releases("netbsd", arch);
-            if (releases.empty()) {
-                std::cerr << "ERROR: no cached releases for " << arch
-                          << " under " << g_cache_root << "\n";
-                return 1;
-            }
-        } else {
+        if (!opt.update) releases = cached_releases("netbsd", arch);
+        if (releases.empty()) {
             std::string error;
             if (!netbsd_mirror_releases(mirror, arch, opt.timeout, releases, error)) {
                 std::cerr << "ERROR: " << error << "\n";
@@ -1658,37 +1629,25 @@ static int run_netbsd(const Options& opt) {
         return 0;
     }
 
+    if (opt.queries.empty() && !opt.update) {
+        std::cerr << "ERROR: Please supply some package!\n";
+        return 1;
+    }
+
     std::string release = opt.release;
     if (release.empty()) {
-        if (opt.offline) {
-            release = latest_cached_release("netbsd", arch);
-            if (release.empty()) {
-                std::cerr << "ERROR: no cached NetBSD release for " << arch
-                          << "; use --release or run without --offline\n";
-                return 1;
-            }
-        } else if (!netbsd_default_release(mirror, arch, opt.timeout, release)) {
+        if (!opt.update) release = latest_cached_release("netbsd", arch);
+        if (release.empty() && !netbsd_default_release(mirror, arch, opt.timeout, release))
             return 1;
-        }
     }
 
     std::string db = local_list("netbsd", release, arch, "packages", "SHA512");
 
-    if (opt.offline) {
-        if (!file_exists(db)) {
-            std::cerr << "ERROR: no cached package list at " << db
-                      << "; run without --offline\n";
-            return 1;
-        }
-    } else if (opt.update || !file_exists(db)) {
+    if (opt.update || !file_exists(db)) {
         if (!netbsd_download(mirror, release, arch, opt.timeout)) return 1;
     }
 
-    if (opt.queries.empty()) {
-        if (opt.update) return 0;
-        std::cerr << "ERROR: Please supply some package!\n";
-        return 1;
-    }
+    if (opt.queries.empty()) return 0;  // --update without a search
 
     std::vector<std::regex> patterns;
     for (const auto& word : opt.queries) {
@@ -1759,15 +1718,10 @@ int main(int argc, char* argv[]) {
     Options opt = parse_args(argc, argv, prog);
     if (opt.error) return EXIT_FAILURE;
 
-    if (opt.offline && opt.update) {
-        std::cerr << "error: --offline and --update cannot be used together\n";
-        return EXIT_FAILURE;
-    }
-
     if (opt.clean) return clean_cache() ? 0 : EXIT_FAILURE;
 
     CurlGlobal curl;
-    if (!opt.offline && !curl.ok) {
+    if (!curl.ok) {
         std::cerr << "ERROR: could not initialise libcurl\n";
         return EXIT_FAILURE;
     }
