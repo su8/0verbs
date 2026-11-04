@@ -59,7 +59,6 @@ Common examples:
 | `--arch ARCH` | Package architecture, e.g. `amd64` or `x86_64`. |
 | `--list-releases` | List releases found on the mirror. |
 | `-u`, `--update` | Re-download the package indexes. |
-| `--offline` | Use only cached indexes; never fetch. |
 | `--mirror URL` | Override the package mirror. |
 | `--cache-dir DIR` | Override the cache directory. |
 | `--clean` | Remove the cache and exit. |
@@ -129,7 +128,6 @@ diagnostic messages are written to standard error, so stdout stays valid JSON.
   contain an uppercase quarter such as `10.0_2026Q3`.
 * Searches combine the OpenBSD `packages` and `packages-stable` indexes and
   prefer the stable entry when the same package line appears in both.
-* Use `--offline` when the network is unavailable and the cache is populated.
 
 
 ```bash
