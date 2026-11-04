@@ -56,6 +56,27 @@ pkg_info -Q curl
 
 ---
 
+### The C++ version needs some packages to be installed:
+
+```bash
+Build g++ -std=c++17 -O2 -o 0verbs 0verbs.cpp -lcurl -lbz2
+
+Debian sudo apt install build-essential libcurl4-openssl-dev libbz2-dev
+
+Fedora/RHEL sudo dnf install gcc-c++ libcurl-devel bzip2-devel
+
+OpenBSD doas pkg_add curl bzip2
+
+NetBSD pkgin install curl bzip2
+
+MacOS brew install curl bzip2
+MacOS g++ -std=c++17 -O2 -o 0verbs 0verbs.cpp I$(brew --prefix curl)/include -I$(brew --prefix bzip2)/include -L$(brew --prefix curl)/lib -L$(brew --prefix bzip2)/lib -lcurl -lbz2
+```
+
+### The syntax from the python version stays as is with the C++ version one
+
+---
+
 ### Trying it from macOS/Linux/other BSD
 
 Outside OpenBSD/NetbSD the script downloads the latest release and maps your CPU to the matching OpenBSD/NetBSD architecture (Apple Silicon -> `aarch64`, Intel -> `amd64`). Pick another release or architecture with `--release` and `--arch`:
