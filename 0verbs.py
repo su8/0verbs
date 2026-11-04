@@ -74,11 +74,13 @@ NETBSD_ARCH_NAMES = {
     'mips64': 'mips64',
 }
 
-# OpenBSD package name: stem-version[-flavor], version may end in pN (pkgfix)
-# and vN (epoch); see packages-specs(7). NetBSD pkg names are usually
-# stem-version.tgz with no pN/vN suffix, but the regex is harmless there.
+# Package name: stem-version[-flavor]
+# OpenBSD: version may end in pN (pkgfix) and vN (epoch);
+#          see packages-specs(7).
+# NetBSD : version may also end in nbN (pkgsrc revision).
 PACKAGE_NAME = re.compile(
     r'(?P<stem>.+?)-(?P<version>\d[^-]*?)(?:p(?P<p>\d+))?(?:v(?P<v>\d+))?'
+    r'(?:nb(?P<nb>\d+))?'
     r'(?P<flavor>(?:-[^-]+)*)$')
 
 REGEX_SYNTAX = set('^$*?()[]{}|\\')
@@ -273,17 +275,33 @@ def exact_name(name, patterns):
                for pattern in patterns)
 
 
-def keep_newest(matches):
+def keep_newest(matches, stem_only=False):
+    """
+    Collapse multiple versions of the same package.
+
+    stem_only=False (OpenBSD): keep the newest version per (stem, flavor,
+        first version digit), so php-8.3 and php-8.4 stay separate but
+        php-8.4.1 and php-8.4.2 collapse.
+
+    stem_only=True (NetBSD): keep the newest version per stem, so jdk-17
+        and jdk-21 collapse into one row (the newest of either).
+    """
     newest = {}
     for match in matches:
         parts = PACKAGE_NAME.match(match[0])
         if not parts:
             newest[match[0]] = ((), match)
             continue
-        key = (parts['stem'], parts['flavor'],
-               re.match(r'\d+', parts['version'])[0])
-        rank = (int(parts['v'] or 0), version_order(parts['version']),
-                int(parts['p'] or -1))
+        if stem_only:
+            key = parts['stem']
+        else:
+            key = (parts['stem'], parts['flavor'],
+                   re.match(r'\d+', parts['version'])[0])
+        # Rank: epoch (vN) first, then version, then pN (pkgfix), then nbN
+        rank = (int(parts['v'] or 0),
+                version_order(parts['version']),
+                int(parts['p'] or -1),
+                int(parts['nb'] or -1))
         if key not in newest or rank > newest[key][0]:
             newest[key] = (rank, match)
     return [match for _, match in newest.values()]
@@ -300,9 +318,13 @@ def hide_superseded(matches):
 
 
 def search(sources, patterns, queries=None, show_sha=False, exact=False,
-           age_paths=None, hash_label='SHA256'):
+           age_paths=None, hash_label='SHA256', always_newest=False):
     """
-    sources : list of (label, iterable_of_(name, hash))
+    sources        : list of (label, iterable_of_(name, hash))
+    always_newest  : collapse multiple versions of the same package even when
+                     exact=False. On NetBSD this uses stem-only matching so
+                     only one row per package is shown; on OpenBSD the flag
+                     is not used (the backend leaves it False).
     """
     matches = []
     suggestions_pool = []
@@ -324,8 +346,8 @@ def search(sources, patterns, queries=None, show_sha=False, exact=False,
             return
 
     matches = hide_superseded(matches)
-    if exact:
-        matches = keep_newest(matches)
+    if exact or always_newest:
+        matches = keep_newest(matches, stem_only=always_newest)
 
     def order(match):
         return (re.split(r'-(?=\d)', match[0], maxsplit=1)[0],
@@ -385,7 +407,8 @@ def build_parser(prog):
 Package lists are saved under {CACHE_ROOT}.
 OpenBSD mirrors come from {INSTALLURL} (or {OPENBSD_DEFAULT_MIRROR}).
 NetBSD mirrors come from {NETBSD_DEFAULT_MIRROR}.
-NetBSD keeps the raw SHA512.bz2 and a cleaned SHA512 (no "All/" prefix).''')
+NetBSD keeps the raw SHA512.bz2 and a cleaned SHA512 (no "All/" prefix),
+and always shows only the newest version of each package.''')
 
     parser.add_argument('queries', nargs='*', metavar='package',
         help='words to search for, case-insensitive; a package must contain '
@@ -470,7 +493,8 @@ def run_netbsd(args, parser):
                show_sha=args.sha512,
                exact=args.exact,
                age_paths=[db],
-               hash_label='SHA512')
+               hash_label='SHA512',
+               always_newest=True)
     elif not args.update:
         sys.exit('ERROR: Please supply some package!')
 
