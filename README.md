@@ -69,8 +69,16 @@ OpenBSD doas pkg_add curl bzip2
 
 NetBSD pkgin install curl bzip2
 
+# ---------
 MacOS brew install curl bzip2
 MacOS g++ -std=c++17 -O2 -o 0verbs 0verbs.cpp I$(brew --prefix curl)/include -I$(brew --prefix bzip2)/include -L$(brew --prefix curl)/lib -L$(brew --prefix bzip2)/lib -lcurl -lbz2
+```
+
+To compile the `0verbs.cpp`L
+
+```bash
+make -j8 # 8 cores/threads to use in parallel compile
+sudo/doas make install
 ```
 
 ### The syntax from the python version stays as is with the C++ version one
