@@ -1,0 +1,419 @@
+.Dd November 4, 2026
+.Dt 0VERBS 1
+.Os
+.Sh NAME
+.Nm 0verbs
+.Nd search OpenBSD and NetBSD package indexes
+.Sh SYNOPSIS
+.Nm
+.Op Fl eFjuv
+.Op Fl \-os Ar os
+.Op Fl \-release Ar release
+.Op Fl \-arch Ar arch
+.Op Fl \-mirror Ar url
+.Op Fl \-cache-dir Ar dir
+.Op Fl \-limit Ar n
+.Op Fl \-max-age Ar days
+.Op Fl \-timeout Ar seconds
+.Op Fl \-list-releases
+.Op Fl \-clean
+.Op Fl \-sha256 | Fl \-sha512
+.Op Fl \-url
+.Op Fl \-installed
+.Op Fl \-installed-only
+.Op Fl \-newest
+.Op Fl \-no-suggest
+.Op Ar package ...
+.Sh DESCRIPTION
+.Nm
+searches the package indexes published by
+.Ox
+and
+.Nx .
+Indexes are downloaded once, cached, and reused.
+By default, cached data is used whenever it is available; the network is
+contacted only when the cache is missing or when
+.Fl \-update
+is given.
+.Pp
+Each
+.Ar package
+argument is a case-insensitive word.
+A package must contain every word.
+A word containing any of
+.Ql ^$*?()[]{}|\e
+is treated as an ECMAScript regular expression; other words are matched
+literally.
+Use
+.Fl F
+to force literal matching for every word.
+.Pp
+Unless
+.Fl \-release
+is given, the newest cached release for the selected operating system and
+architecture is used.
+If no release is cached, the latest release is discovered on the mirror.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl h , Fl \-help
+Print a usage summary and exit.
+.It Fl \-version
+Print the program version and exit.
+.It Fl \-os Ar os
+Select the package universe.
+.Ar os
+must be
+.Cm openbsd
+or
+.Cm netbsd .
+If omitted, the operating system is detected with
+.Xr uname 3 ;
+systems other than
+.Ox
+are treated as
+.Nx .
+.It Fl \-release Ar release
+Search the specified release.
+Valid forms include
+.Ar 7.8 ,
+.Ar snapshots ,
+and
+.Ar 10.0_2026Q3 .
+If the release is not cached, or if
+.Fl \-update
+is used, its indexes are downloaded.
+Without this option, the newest cached release is used, or the latest release
+is discovered from the mirror when the cache is empty.
+.It Fl \-arch Ar arch
+Use the specified package architecture, for example
+.Ar amd64
+or
+.Ar x86_64 .
+Architecture names are normalized between the names reported by
+.Xr uname 3
+and the names used on the mirrors.
+The default is the current machine architecture.
+.It Fl \-list-releases
+List release names.
+Cached releases are listed unless
+.Fl \-update
+is given, in which case the mirror is queried.
+If no releases are cached, the mirror is queried.
+With
+.Fl j ,
+the output is a JSON array of strings.
+.It Fl u , Fl \-update
+Refresh cached package indexes from the mirror.
+If
+.Fl \-release
+is not given, the latest release is discovered from the mirror.
+When used without a search word and without
+.Fl \-list-releases ,
+the indexes are refreshed and
+.Nm
+exits.
+When search words are present, the indexes are refreshed and the search is
+performed afterwards.
+.It Fl \-mirror Ar url
+Use
+.Ar url
+as the package mirror instead of the default.
+The URL must begin with
+.Ql http://
+or
+.Ql https:// .
+For
+.Ox ,
+the default mirror is read from
+.Pa /etc/installurl ;
+if that file is missing or invalid, the public CDN mirror is used.
+For
+.Nx ,
+the default is the public CDN pkgsrc mirror.
+.It Fl \-cache-dir Ar dir
+Store cached indexes under
+.Ar dir
+instead of the default cache directory.
+A leading
+.Ql ~
+is expanded to the home directory.
+Trailing slashes are removed.
+.It Fl \-clean
+Remove the cache directory and exit.
+For safety, the directory must live beneath the default cache root or be named
+.Ql 0verbs .
+.It Fl \-sha256 , Fl \-sha512
+Show each package's digest in text output.
+The digest type is determined by the backend: SHA256 for
+.Ox
+and SHA512 for
+.Nx .
+Both options are equivalent aliases.
+JSON output always includes the digest.
+.It Fl \-url
+Show each package's download URL in text output.
+JSON output always includes the URL.
+.It Fl j , Fl \-json
+Write machine-readable JSON to standard output.
+Progress and diagnostic messages are written to standard error.
+See
+.Sx JSON OUTPUT .
+.It Fl \-limit Ar n
+Show at most
+.Ar n
+results after matching, de-duplication, and newest-version selection.
+.Ar n
+must be at least 1.
+.It Fl \-installed
+Mark packages that are installed locally.
+Installed packages are read from the system package database.
+Matching ignores the version: an installed
+.Pa firefox-149.0
+marks an available
+.Pa firefox-150.0
+as installed.
+In text output the package is followed by
+.Ql [installed] ;
+in JSON output the
+.Va installed
+field is true.
+.It Fl \-installed-only
+Show only package lines that are installed locally.
+This implies
+.Fl \-installed
+and collapses each package line to its newest available version.
+.It Fl \-newest
+Show only the newest version of each package line.
+For
+.Ox ,
+flavors are kept separate and the line is based on the major version, or on
+the major and minor versions for projects with a major version below 10.
+For
+.Nx ,
+one row per package stem is shown.
+.It Fl \-max-age Ar days
+Warn on standard error when the cached index is older than
+.Ar days .
+The default is 7.
+A value of 0 disables the warning.
+.It Fl \-timeout Ar seconds
+Set the network timeout in seconds.
+The default is 120.
+.Ar seconds
+must be at least 1.
+.It Fl e , Fl \-exact
+Match whole package names or package stems instead of searching for
+substrings.
+This also shows only the newest version of each matching line.
+.It Fl F , Fl \-fixed-strings
+Treat every search word as a literal string, even if it contains characters
+that would otherwise be interpreted as a regular expression.
+.It Fl \-no-suggest
+Do not print
+.Dq Did you mean?
+suggestions when a search has no matches.
+.It Fl v , Fl \-verbose
+Print extra diagnostics to standard error.
+.It Cm \-\-
+End option processing.
+All following arguments are treated as search words.
+.It Ar package
+One or more case-insensitive words that must all occur in a package name.
+If no search word is supplied, the program exits with an error unless
+.Fl \-update ,
+.Fl \-list-releases ,
+.Fl \-clean ,
+.Fl h ,
+or
+.Fl \-version
+is used.
+.El
+.Sh CACHE-FIRST BEHAVIOR
+Searches read cached indexes and do not contact the network when a cache is
+present.
+The network is used in the following cases:
+.Bl -bullet -offset indent
+.It
+No cached index exists for the selected release and architecture.
+.It
+.Fl \-update
+is given.
+.It
+.Fl \-list-releases
+is used and no releases are cached.
+.El
+.Pp
+Without
+.Fl \-release ,
+the newest cached release is selected.
+If nothing is cached, the latest release is discovered from the mirror.
+With
+.Fl \-update
+and no
+.Fl \-release ,
+the mirror is asked for the latest release.
+.Pp
+The first run for a release therefore requires either a network connection or a
+populated cache.
+Use
+.Fl \-update
+to fetch fresh indexes; cached data is used automatically at all other times.
+.Sh JSON OUTPUT
+With
+.Fl j ,
+.Nm
+writes a single JSON object to standard output.
+The top-level fields are:
+.Bl -tag -width Ds
+.It Va os
+The selected operating system,
+.Ql openbsd
+or
+.Ql netbsd .
+.It Va release
+The selected release.
+.It Va arch
+The normalized architecture.
+.It Va count
+The number of returned packages.
+.It Va packages
+An array of package objects.
+.It Va suggestions
+An optional array of suggested package stems, present when the search had no
+matches and suggestions were generated.
+.El
+.Pp
+Each package object contains:
+.Bl -tag -width Ds
+.It Va name
+The full package name, including version and flavor.
+.It Va version
+The parsed version, or
+.Ql null
+if the name could not be parsed.
+.It Va flavor
+The flavor suffix, or
+.Ql null .
+.It Va hash_type
+The digest type, either
+.Ql sha256
+or
+.Ql sha512 .
+.It Va hash
+The package digest.
+.It Va url
+The package download URL.
+.It Va branch
+.Ql stable
+for entries from
+.Pa packages-stable
+on
+.Ox ,
+otherwise
+.Ql null .
+.It Va installed
+A boolean indicating whether the package line is installed locally.
+.El
+.Pp
+.Fl \-list-releases Fl j
+prints a JSON array of release names instead of an object.
+.Sh EXIT STATUS
+.Ex -std
+A search that returns no matches is not an error.
+Diagnostics and the
+.Dq No matches found.
+message are written to standard error.
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa /etc/installurl
+Default
+.Ox
+mirror URL, when present.
+.It Pa $XDG_CACHE_HOME/0verbs
+Cache directory when
+.Ev XDG_CACHE_HOME
+is set.
+.It Pa ~/.cache/0verbs
+Default cache directory otherwise.
+.It Pa ~/.cache/0verbs/openbsd/<release>/packages/<arch>/SHA256
+Cached
+.Ox
+package index.
+.It Pa ~/.cache/0verbs/openbsd/<release>/packages-stable/<arch>/SHA256
+Cached
+.Ox
+stable package index.
+.It Pa ~/.cache/0verbs/netbsd/<release>/packages/<arch>/SHA512.bz2
+Cached compressed
+.Nx
+index.
+.It Pa ~/.cache/0verbs/netbsd/<release>/packages/<arch>/SHA512
+Decompressed and cleaned
+.Nx
+index used for searching.
+.It Pa /var/db/pkg
+.Ox
+package database, also checked on
+.Nx .
+.It Pa /usr/pkg/pkgdb
+.Nx
+package database.
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width Ds
+.It Ev XDG_CACHE_HOME
+Base directory for the cache.
+The cache is stored in
+.Pa $XDG_CACHE_HOME/0verbs .
+.It Ev HOME
+Used to locate the default cache directory when
+.Ev XDG_CACHE_HOME
+is not set.
+.It Ev USERPROFILE
+Fallback home directory on systems that do not set
+.Ev HOME .
+.It Ev http_proxy , https_proxy , no_proxy
+Standard proxy variables honored by libcurl.
+.El
+.Sh EXAMPLES
+Search the newest cached release:
+.Bd -literal -offset indent
+$ 0verbs firefox
+.Ed
+.Pp
+Show the newest patch of each exact PHP line, with digests:
+.Bd -literal -offset indent
+$ 0verbs -e php --newest --sha256
+.Ed
+.Pp
+Search NetBSD and emit JSON:
+.Bd -literal -offset indent
+$ 0verbs --os netbsd --json --limit 20 jdk
+.Ed
+.Pp
+Refresh the cache, then search:
+.Bd -literal -offset indent
+$ 0verbs --update firefox
+.Ed
+.Pp
+Refresh and list releases from the mirror:
+.Bd -literal -offset indent
+$ 0verbs --update --list-releases
+.Ed
+.Pp
+Show only installed package lines:
+.Bd -literal -offset indent
+$ 0verbs --installed-only firefox
+.Ed
+.Pp
+Search for a literal string containing regular-expression characters:
+.Bd -literal -offset indent
+$ 0verbs -F 'c++'
+.Ed
+.Sh SEE ALSO
+.Xr pkg_add 1 ,
+.Xr pkg_info 1 ,
+.Xr pkgin 1 ,
+.Xr curl 1 ,
+.Xr bzip2 1
