@@ -422,9 +422,9 @@ and always shows only the newest version of each package.''')
     parser.add_argument('--os', choices=('openbsd', 'netbsd'),
         help='which package universe to search (default: auto-detect)')
     parser.add_argument('--sha256', action='store_true',
-        help='also show each package\'s SHA256 sum (OpenBSD lists)')
+        help='also show each package\'s hash (SHA256 on OpenBSD, SHA512 on NetBSD)')
     parser.add_argument('--sha512', action='store_true',
-        help='also show each package\'s SHA512 sum (NetBSD lists)')
+        help='same as --sha256')
     parser.add_argument('--update', action='store_true',
         help='re-download the package lists')
     parser.add_argument('--release',
@@ -470,7 +470,7 @@ def run_openbsd(args, parser):
             db = local_list('openbsd', release, arch, folder)
             sources.append((label, openbsd_parse(db)))
         search(sources, patterns, queries=args.queries,
-               show_sha=args.sha256,
+               show_sha=args.sha256 or args.sha512,
                exact=args.exact,
                age_paths=[local_list('openbsd', release, arch, 'packages-stable')],
                hash_label='SHA256')
@@ -496,7 +496,7 @@ def run_netbsd(args, parser):
         patterns = [word_pattern(w) for w in args.queries]
         sources = [('', netbsd_parse(db))]
         search(sources, patterns, queries=args.queries,
-               show_sha=args.sha512,
+               show_sha=args.sha256 or args.sha512,
                exact=args.exact,
                age_paths=[db],
                hash_label='SHA512',
