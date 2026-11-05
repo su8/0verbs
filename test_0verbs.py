@@ -22,6 +22,11 @@ def test_lines_split_on_minor_below_10():
     assert sorted(x[0] for x in v.keep_newest(m)) == ['php-8.3.20', 'php-8.4.11']
 
 
+def test_stable_update_hides_single_release_version():
+    m = [('curl-8.16.0', '', ''), ('curl-8.19.0', ' (stable)', '')]
+    assert [x[0] for x in v.hide_superseded(m)] == ['curl-8.19.0']
+
+
 def test_netbsd_newest_uses_nb_revision():
     m = [('curl-8.10.1nb2', '', ''), ('curl-8.10.1nb10', '', ''), ('curl-8.9.0', '', '')]
     assert [x[0] for x in v.keep_newest(m, stem_only=True)] == ['curl-8.10.1nb10']

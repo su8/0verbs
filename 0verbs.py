@@ -292,13 +292,29 @@ def keep_newest(matches, stem_only=False):
 
 
 def hide_superseded(matches):
+    """Hide release packages that have an update in packages-stable.
+
+    Most ports have one version per release, so any stable update of the
+    same stem and flavor replaces it (curl-8.16.0 -> curl-8.19.0). Only when
+    the release has several branches (php-8.3 and php-8.4) do they match
+    per version_line.
+    """
     def line(name):
         parts = PACKAGE_NAME.match(name)
         return parts and (parts['stem'], parts['flavor'],
                           version_line(parts['version']))
-    updated = {line(name) for name, label, _ in matches if label}
+    branches = {}
+    for name, label, _ in matches:
+        if not label and line(name):
+            branches.setdefault(line(name)[:2], set()).add(line(name)[2])
+
+    def key(name):
+        full = line(name)
+        return full and (full if len(branches.get(full[:2], ())) > 1 else full[:2])
+
+    updated = {key(name) for name, label, _ in matches if label}
     return [m for m in matches
-            if m[1] or not line(m[0]) or line(m[0]) not in updated]
+            if m[1] or not key(m[0]) or key(m[0]) not in updated]
 
 
 def search(sources, patterns, queries=None, show_sha=False, exact=False,
