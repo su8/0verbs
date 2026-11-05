@@ -47,6 +47,12 @@ def test_release_keeps_case():
     assert args.release == '11.0_2026Q3'
 
 
+def test_arch_is_normalized():
+    args = v.build_parser('0verbs').parse_args(['--arch', 'x86_64'])
+    assert v.OpenBSD(args.arch).arch == 'amd64'
+    assert v.NetBSD('armv7l').arch == 'earmv7hf'
+
+
 if __name__ == '__main__':
     for name, fn in list(globals().items()):
         if name.startswith('test_'):

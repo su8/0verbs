@@ -98,8 +98,8 @@ class Backend:
 
     def __init__(self, arch=None):
         self.mirror = self.default_mirror()
-        machine = platform.machine().lower()
-        self.arch = arch or self.ARCH_NAMES.get(machine, machine)
+        machine = (arch or platform.machine()).lower()
+        self.arch = self.ARCH_NAMES.get(machine, machine)
 
     def default_mirror(self):
         raise NotImplementedError
@@ -429,7 +429,7 @@ always shows only the newest version of each package.''')
                            '7.8, snapshots or 11.0_2026Q3', lower=False),
         help='release to search, downloaded if needed')
     parser.add_argument('--arch',
-        type=name_matching(r'[a-z0-9]+', 'amd64'),
+        type=name_matching(r'[a-z0-9_]+', 'amd64 or x86_64'),
         help='package architecture to search, downloaded if needed')
     parser.add_argument('--list-releases', action='store_true',
         help='list available releases on the mirror')
