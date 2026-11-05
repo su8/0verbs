@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright 11/04/2026 10/23/2026 https://github.com/su8/0verbs
+# Copyright 10/23/2026 https://github.com/su8/0verbs
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2 of the License, or
