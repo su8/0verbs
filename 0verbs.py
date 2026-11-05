@@ -176,7 +176,8 @@ def openbsd_parse(db_path):
     try:
         with open(db_path, errors='replace') as fh:
             for line in fh:
-                m = re.search(r'\((.+)\.tgz\) = ([A-Za-z0-9+/]+)', line)
+                # Digests are base64, so keep the trailing = padding
+                m = re.search(r'\((.+)\.tgz\) = (\S+)', line)
                 if m:
                     yield m.group(1), m.group(2)
     except FileNotFoundError:
