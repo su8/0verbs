@@ -377,9 +377,10 @@ def search(sources, patterns, queries=None, show_sha=False, exact=False,
 # Argument parsing
 # ---------------------------------------------------------------------------
 
-def name_matching(pattern, example):
+def name_matching(pattern, example, lower=True):
     def check(value):
-        value = value.lower()
+        if lower:
+            value = value.lower()
         if not re.fullmatch(pattern, value):
             raise argparse.ArgumentTypeError(f'{value!r} is not like {example}')
         return value
@@ -423,8 +424,9 @@ and always shows only the newest version of each package.''')
     parser.add_argument('--update', action='store_true',
         help='re-download the package lists')
     parser.add_argument('--release',
-        type=name_matching(r'\d+\.\d+(_[a-z0-9q]+)?|snapshots',
-                           '7.8, snapshots or 11.0_2026Q3'),
+        # NetBSD release dirs have an uppercase Q (11.0_2026Q3), so keep the case
+        type=name_matching(r'\d+\.\d+(_[A-Za-z0-9]+)?|snapshots',
+                           '7.8, snapshots or 11.0_2026Q3', lower=False),
         help='release to search, downloaded if needed')
     parser.add_argument('--arch',
         type=name_matching(r'[a-z0-9]+', 'amd64'),
