@@ -95,6 +95,12 @@ def version_order(name):
             for part in re.split(r'(\d+)', name)]
 
 
+def version_line(version):
+    # firefox 149/150 split on major; php 8.3/8.4, python 3.12/3.13 on minor
+    m = re.match(r'(\d+)(?:\.\d+)?', version)
+    return m[0] if int(m[1]) < 10 else m[1]
+
+
 def detect_os():
     if platform.system() == 'OpenBSD':
         return 'openbsd'
@@ -281,7 +287,7 @@ def keep_newest(matches, stem_only=False):
     Collapse multiple versions of the same package.
 
     stem_only=False (OpenBSD): keep the newest version per (stem, flavor,
-        first version digit), so php-8.3 and php-8.4 stay separate but
+        version_line), so php-8.3 and php-8.4 stay separate but
         php-8.4.1 and php-8.4.2 collapse.
 
     stem_only=True (NetBSD): keep the newest version per stem, so jdk-17
@@ -297,7 +303,7 @@ def keep_newest(matches, stem_only=False):
             key = parts['stem']
         else:
             key = (parts['stem'], parts['flavor'],
-                   re.match(r'\d+', parts['version'])[0])
+                   version_line(parts['version']))
         # Rank: epoch (vN) first, then version, then pN (pkgfix), then nbN
         rank = (int(parts['v'] or 0),
                 version_order(parts['version']),
@@ -312,7 +318,7 @@ def hide_superseded(matches):
     def line(name):
         parts = PACKAGE_NAME.match(name)
         return parts and (parts['stem'], parts['flavor'],
-                          re.match(r'\d+', parts['version'])[0])
+                          version_line(parts['version']))
     updated = {line(name) for name, label, _ in matches if label}
     return [m for m in matches
             if m[1] or not line(m[0]) or line(m[0]) not in updated]
