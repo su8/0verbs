@@ -29,51 +29,6 @@ from difflib import get_close_matches
 
 CACHE_ROOT = os.path.join(os.path.expanduser('~'), '.cache', '0verbs')
 
-# ---------------------------------------------------------------------------
-# Per-OS configuration
-# ---------------------------------------------------------------------------
-#
-# "openbsd": mirrors publish a plain-text SHA256 list per
-#            <release>/<folder>/<arch>/SHA256, where folder is packages
-#            or packages-stable. installurl(5) is honoured.
-#
-# "netbsd" : mirrors publish <arch>/<release>/SHA512.bz2, a bzip2-compressed
-#            list. It is saved decompressed as SHA512.
-#
-# Both formats are parsed by search(); only the download/decompress step
-# and the release discovery differ.
-
-INSTALLURL = '/etc/installurl'
-OPENBSD_DEFAULT_MIRROR = 'https://cdn.openbsd.org/pub/OpenBSD'
-OPENBSD_FOLDERS = ('packages', 'packages-stable')
-
-NETBSD_DEFAULT_MIRROR = 'https://cdn.netbsd.org/pub/pkgsrc/packages/NetBSD'
-
-# platform.machine() -> package arch, per OS family
-OPENBSD_ARCH_NAMES = {
-    'x86_64': 'amd64', 'amd64': 'amd64',
-    'arm64': 'aarch64', 'aarch64': 'aarch64',
-    'i386': 'i386', 'i486': 'i386', 'i586': 'i386', 'i686': 'i386', 'x86': 'i386',
-    'armv7l': 'arm', 'armv7': 'arm',
-    'macppc': 'powerpc',
-    'octeon': 'mips64',
-    'loongson': 'mips64el',
-    'riscv64': 'riscv64',
-    'ppc64': 'powerpc64', 'powerpc64': 'powerpc64',
-    'sparc64': 'sparc64',
-    'mips64': 'mips64',
-}
-NETBSD_ARCH_NAMES = {
-    'x86_64': 'amd64', 'amd64': 'amd64',
-    'i386': 'i386', 'i486': 'i386', 'i586': 'i386', 'i686': 'i386', 'x86': 'i386',
-    'arm64': 'aarch64', 'aarch64': 'aarch64',
-    'armv7l': 'earmv7hf', 'armv7': 'earmv7hf',
-    'macppc': 'macppc',
-    'riscv64': 'riscv64',
-    'sparc64': 'sparc64',
-    'mips64': 'mips64',
-}
-
 # Package name: stem-version[-flavor]
 # OpenBSD: version may end in pN (pkgfix) and vN (epoch);
 #          see packages-specs(7).
@@ -127,122 +82,166 @@ def fetch(url, announce=False, missing_ok=False):
     sys.exit(error)
 
 
-def local_list(flavour, release, arch, folder='packages', filename='SHA256'):
-    return os.path.join(CACHE_ROOT, flavour, release, folder, arch, filename)
-
-
 # ---------------------------------------------------------------------------
-# OpenBSD backend
+# Backends: one class per OS. To add a BSD, subclass Backend and add it to
+# BACKENDS.
 # ---------------------------------------------------------------------------
 
-def openbsd_mirror():
-    try:
-        with open(INSTALLURL) as fh:
-            url = fh.readline().strip().rstrip('/')
-    except OSError:
-        url = ''
-    return url or OPENBSD_DEFAULT_MIRROR
+class Backend:
+    NAME = ''
+    HASH_LABEL = ''         # digest name, also the cached file name
+    HASH_RE = None          # pattern with (name, digest) groups
+    RELEASE_RE = None       # pattern for release dirs in the mirror listing
+    ARCH_NAMES = {}         # platform.machine() -> package arch
+    FOLDERS = (('packages', ''),)  # (folder, label shown after the name)
+    NEWEST_ONLY = False     # always show one row per stem
+
+    def __init__(self, arch=None):
+        self.mirror = self.default_mirror()
+        machine = platform.machine().lower()
+        self.arch = arch or self.ARCH_NAMES.get(machine, machine)
+
+    def default_mirror(self):
+        raise NotImplementedError
+
+    def releases_url(self):
+        raise NotImplementedError
+
+    def url(self, release, folder):
+        raise NotImplementedError
+
+    def download(self, release, folder):
+        raise NotImplementedError
+
+    def releases(self):
+        listing = fetch(self.releases_url()).decode('utf-8', errors='ignore')
+        return sorted(re.findall(self.RELEASE_RE, listing), key=version_order)
+
+    def default_release(self):
+        releases = self.releases()
+        if not releases:
+            sys.exit(f'ERROR: could not list releases at {self.releases_url()}')
+        return releases[-1]
+
+    def path(self, release, folder='packages'):
+        return os.path.join(CACHE_ROOT, self.NAME, release, folder, self.arch,
+                            self.HASH_LABEL)
+
+    def save(self, path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f'{path}.tmp'
+        with open(tmp, 'wb') as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+
+    def parse(self, path):
+        """Yield (name, digest) from a cached list."""
+        try:
+            with open(path, errors='replace') as fh:
+                for line in fh:
+                    m = self.HASH_RE.search(line)
+                    if m:
+                        yield m.group(1), m.group(2)
+        except FileNotFoundError:
+            return
 
 
-def openbsd_mirror_releases(mirror):
-    listing = fetch(f'{mirror}/').decode('utf-8', errors='ignore')
-    return sorted(re.findall(r'href="(\d+\.\d+)/"', listing), key=version_order)
+class OpenBSD(Backend):
+    """<release>/<folder>/<arch>/SHA256, plain text, base64 digests.
+    Like pkg_add(1), the mirror comes from installurl(5) and packages-stable
+    holds a release's updates."""
+    NAME = 'openbsd'
+    HASH_LABEL = 'SHA256'
+    # Digests are base64, so keep the trailing = padding
+    HASH_RE = re.compile(r'\((.+)\.tgz\) = (\S+)')
+    RELEASE_RE = re.compile(r'href="(\d+\.\d+)/"')
+    ARCH_NAMES = {
+        'x86_64': 'amd64', 'amd64': 'amd64',
+        'arm64': 'aarch64', 'aarch64': 'aarch64',
+        'i386': 'i386', 'i486': 'i386', 'i586': 'i386', 'i686': 'i386', 'x86': 'i386',
+        'armv7l': 'arm', 'armv7': 'arm',
+        'macppc': 'powerpc',
+        'octeon': 'mips64',
+        'loongson': 'mips64el',
+        'riscv64': 'riscv64',
+        'ppc64': 'powerpc64', 'powerpc64': 'powerpc64',
+        'sparc64': 'sparc64',
+        'mips64': 'mips64',
+    }
+    FOLDERS = (('packages', ''), ('packages-stable', ' (stable)'))
+    INSTALLURL = '/etc/installurl'
+    DEFAULT_MIRROR = 'https://cdn.openbsd.org/pub/OpenBSD'
+
+    def default_mirror(self):
+        try:
+            with open(self.INSTALLURL) as fh:
+                url = fh.readline().strip().rstrip('/')
+        except OSError:
+            url = ''
+        return url or self.DEFAULT_MIRROR
+
+    def releases_url(self):
+        return f'{self.mirror}/'
+
+    def default_release(self):
+        if platform.system() == 'OpenBSD':
+            return platform.release()
+        return super().default_release()
+
+    def url(self, release, folder):
+        return f'{self.mirror}/{release}/{folder}/{self.arch}/SHA256'
+
+    def download(self, release, folder):
+        url = self.url(release, folder)
+        required = folder == 'packages'  # packages-stable is empty until updates exist
+        data = fetch(url, announce=True, missing_ok=not required)
+        if not data and required:
+            sys.exit(f'ERROR: empty listing for {url}')
+        self.save(self.path(release, folder), data)
+        print(f'saved to {self.path(release, folder)}' if data else 'no updates yet')
 
 
-def openbsd_default_release(mirror):
-    if platform.system() == 'OpenBSD':
-        return platform.release()
-    releases = openbsd_mirror_releases(mirror)
-    if not releases:
-        sys.exit(f'ERROR: could not list releases at {mirror}/')
-    return releases[-1]
+class NetBSD(Backend):
+    """<arch>/<release>/SHA512.bz2, saved decompressed, hex digests."""
+    NAME = 'netbsd'
+    HASH_LABEL = 'SHA512'
+    HASH_RE = re.compile(r'SHA512 \((?:All/)?(.+?)\.tgz\) = ([A-Fa-f0-9]+)')
+    RELEASE_RE = re.compile(r'href="(\d+\.\d+_[^/"]+)/"')
+    ARCH_NAMES = {
+        'x86_64': 'amd64', 'amd64': 'amd64',
+        'i386': 'i386', 'i486': 'i386', 'i586': 'i386', 'i686': 'i386', 'x86': 'i386',
+        'arm64': 'aarch64', 'aarch64': 'aarch64',
+        'armv7l': 'earmv7hf', 'armv7': 'earmv7hf',
+        'macppc': 'macppc',
+        'riscv64': 'riscv64',
+        'sparc64': 'sparc64',
+        'mips64': 'mips64',
+    }
+    NEWEST_ONLY = True
+    DEFAULT_MIRROR = 'https://cdn.netbsd.org/pub/pkgsrc/packages/NetBSD'
+
+    def default_mirror(self):
+        return self.DEFAULT_MIRROR
+
+    def releases_url(self):
+        return f'{self.mirror}/{self.arch}/'
+
+    def url(self, release, folder):
+        return f'{self.mirror}/{self.arch}/{release}/SHA512.bz2'
+
+    def download(self, release, folder):
+        url = self.url(release, folder)
+        data = fetch(url, announce=True)
+        try:
+            text = bz2.decompress(data)
+        except (OSError, ValueError) as err:
+            sys.exit(f'ERROR: could not decompress {url}: {err}')
+        self.save(self.path(release, folder), text)
+        print(f'saved to {self.path(release, folder)}')
 
 
-def openbsd_default_arch():
-    machine = platform.machine().lower()
-    return OPENBSD_ARCH_NAMES.get(machine, machine)
+BACKENDS = {backend.NAME: backend for backend in (OpenBSD, NetBSD)}
 
-
-def openbsd_download(mirror, release, arch, folder):
-    url = f'{mirror}/{release}/{folder}/{arch}/SHA256'
-    db = local_list('openbsd', release, arch, folder)
-    data = fetch(url, announce=True, missing_ok=folder != 'packages')
-    if not data and folder == 'packages':
-        sys.exit(f'ERROR: empty listing for {url}')
-    os.makedirs(os.path.dirname(db), exist_ok=True)
-    tmp = f'{db}.tmp'
-    with open(tmp, 'wb') as fh:
-        fh.write(data)
-    os.replace(tmp, db)
-    print(f'saved to {db}' if data else 'no updates yet')
-
-
-def openbsd_parse(db_path):
-    """Yield (name, sha256) from a packages SHA256 file."""
-    try:
-        with open(db_path, errors='replace') as fh:
-            for line in fh:
-                # Digests are base64, so keep the trailing = padding
-                m = re.search(r'\((.+)\.tgz\) = (\S+)', line)
-                if m:
-                    yield m.group(1), m.group(2)
-    except FileNotFoundError:
-        return
-
-
-# ---------------------------------------------------------------------------
-# NetBSD backend
-# ---------------------------------------------------------------------------
-
-def netbsd_mirror():
-    return NETBSD_DEFAULT_MIRROR
-
-
-def netbsd_mirror_releases(mirror, arch):
-    listing = fetch(f'{mirror}/{arch}/').decode('utf-8', errors='ignore')
-    return sorted(
-        re.findall(r'href="(\d+\.\d+_[^/"]+)/"', listing), key=version_order)
-
-
-def netbsd_default_release(mirror, arch):
-    releases = netbsd_mirror_releases(mirror, arch)
-    if not releases:
-        sys.exit(f'ERROR: could not list releases for arch {arch} at '
-                 f'{mirror}/{arch}/')
-    return releases[-1]
-
-
-def netbsd_default_arch():
-    machine = platform.machine().lower()
-    return NETBSD_ARCH_NAMES.get(machine, machine)
-
-
-def netbsd_download(mirror, release, arch):
-    url = f'{mirror}/{arch}/{release}/SHA512.bz2'
-    db = local_list('netbsd', release, arch, 'packages', 'SHA512')
-    data = fetch(url, announce=True)
-    try:
-        text = bz2.decompress(data)
-    except (OSError, ValueError) as err:
-        sys.exit(f'ERROR: could not decompress {url}: {err}')
-    os.makedirs(os.path.dirname(db), exist_ok=True)
-    tmp = f'{db}.tmp'
-    with open(tmp, 'wb') as fh:
-        fh.write(text)
-    os.replace(tmp, db)
-    print(f'saved to {db}')
-
-
-def netbsd_parse(db_path):
-    """Yield (name, sha512) from a NetBSD SHA512 file."""
-    try:
-        with open(db_path, errors='replace') as fh:
-            for line in fh:
-                m = re.search(r'SHA512 \((?:All/)?(.+?)\.tgz\) = ([A-Fa-f0-9]+)', line)
-                if m:
-                    yield m.group(1), m.group(2)
-    except FileNotFoundError:
-        return
 
 
 # ---------------------------------------------------------------------------
@@ -391,8 +390,8 @@ def build_parser(prog):
   {prog} --list-releases          list releases on the mirror
 
 Package lists are saved under {CACHE_ROOT}.
-OpenBSD mirrors come from {INSTALLURL} (or {OPENBSD_DEFAULT_MIRROR}).
-NetBSD mirrors come from {NETBSD_DEFAULT_MIRROR}.
+OpenBSD mirrors come from {OpenBSD.INSTALLURL} (or {OpenBSD.DEFAULT_MIRROR}).
+NetBSD mirrors come from {NetBSD.DEFAULT_MIRROR}.
 NetBSD lists are saved decompressed as SHA512. NetBSD
 always shows only the newest version of each package.''')
 
@@ -400,7 +399,7 @@ always shows only the newest version of each package.''')
         help='words to search for, case-insensitive; a package must contain '
              'all of them. A word with any of ^$*?()[]{}|\\ is a regular '
              'expression')
-    parser.add_argument('--os', choices=('openbsd', 'netbsd'),
+    parser.add_argument('--os', choices=BACKENDS,
         help='which package universe to search (default: auto-detect)')
     parser.add_argument('--sha256', action='store_true',
         help='also show each package\'s hash (SHA256 on OpenBSD, SHA512 on NetBSD)')
@@ -428,75 +427,39 @@ always shows only the newest version of each package.''')
 # Main
 # ---------------------------------------------------------------------------
 
-def run_openbsd(args):
-    mirror = openbsd_mirror()
-
+def run(backend, args):
     if args.list_releases:
-        print(*openbsd_mirror_releases(mirror), sep='\n')
+        print(*backend.releases(), sep='\n')
         return
 
-    release = args.release or openbsd_default_release(mirror)
-    arch = args.arch or openbsd_default_arch()
+    release = args.release or backend.default_release()
+    downloaded = [folder for folder, _ in backend.FOLDERS
+                  if args.update or not os.path.isfile(backend.path(release, folder))]
+    for folder in downloaded:
+        backend.download(release, folder)
 
-    missing = [folder for folder in OPENBSD_FOLDERS
-               if args.update
-               or not os.path.isfile(local_list('openbsd', release, arch, folder))]
-    for folder in missing:
-        openbsd_download(mirror, release, arch, folder)
-
-    if args.queries:
-        patterns = [word_pattern(w) for w in args.queries]
-        sources = []
-        for folder in OPENBSD_FOLDERS:
-            label = ' (stable)' if folder == 'packages-stable' else ''
-            db = local_list('openbsd', release, arch, folder)
-            sources.append((label, openbsd_parse(db)))
-        search(sources, patterns, queries=args.queries,
-               show_sha=args.sha256 or args.sha512,
-               exact=args.exact,
-               age_paths=[local_list('openbsd', release, arch, 'packages-stable')],
-               hash_label='SHA256')
-    elif not missing:
-        sys.exit('ERROR: Please supply some package!')
-
-
-def run_netbsd(args):
-    mirror = netbsd_mirror()
-    arch = args.arch or netbsd_default_arch()
-
-    if args.list_releases:
-        print(*netbsd_mirror_releases(mirror, arch), sep='\n')
+    if not args.queries:
+        if not downloaded:
+            sys.exit('ERROR: Please supply some package!')
         return
 
-    release = args.release or netbsd_default_release(mirror, arch)
-    db = local_list('netbsd', release, arch, 'packages', 'SHA512')
-
-    if args.update or not os.path.isfile(db):
-        netbsd_download(mirror, release, arch)
-
-    if args.queries:
-        patterns = [word_pattern(w) for w in args.queries]
-        sources = [('', netbsd_parse(db))]
-        search(sources, patterns, queries=args.queries,
-               show_sha=args.sha256 or args.sha512,
-               exact=args.exact,
-               age_paths=[db],
-               hash_label='SHA512',
-               always_newest=True)
-    elif not args.update:
-        sys.exit('ERROR: Please supply some package!')
+    sources = [(label, backend.parse(backend.path(release, folder)))
+               for folder, label in backend.FOLDERS]
+    search(sources, [word_pattern(w) for w in args.queries],
+           queries=args.queries,
+           show_sha=args.sha256 or args.sha512,
+           exact=args.exact,
+           # the last folder is the one that changes (packages-stable on OpenBSD)
+           age_paths=[backend.path(release, backend.FOLDERS[-1][0])],
+           hash_label=backend.HASH_LABEL,
+           always_newest=backend.NEWEST_ONLY)
 
 
 def main():
     prog = os.path.basename(sys.argv[0])
-    parser = build_parser(prog)
-    args = parser.parse_intermixed_args()
-
-    target = args.os or detect_os()
-    if target == 'openbsd':
-        run_openbsd(args)
-    else:
-        run_netbsd(args)
+    args = build_parser(prog).parse_intermixed_args()
+    backend = BACKENDS[args.os or detect_os()]
+    run(backend(args.arch), args)
 
 
 if __name__ == '__main__':

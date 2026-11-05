@@ -29,12 +29,12 @@ def test_netbsd_newest_uses_nb_revision():
 
 def test_openbsd_hash_keeps_base64_padding():
     path = _write('SHA256 (curl-8.10.1.tgz) = ab+/cd=\n')
-    assert list(v.openbsd_parse(path)) == [('curl-8.10.1', 'ab+/cd=')]
+    assert list(v.OpenBSD().parse(path)) == [('curl-8.10.1', 'ab+/cd=')]
 
 
 def test_netbsd_parse_strips_all_prefix():
     path = _write('SHA512 (All/curl-8.10.1nb1.tgz) = abc123\n')
-    assert list(v.netbsd_parse(path)) == [('curl-8.10.1nb1', 'abc123')]
+    assert list(v.NetBSD().parse(path)) == [('curl-8.10.1nb1', 'abc123')]
 
 
 def test_release_keeps_case():
