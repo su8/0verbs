@@ -430,12 +430,13 @@ always shows only the newest version of each package.''')
 
 def run_openbsd(args):
     mirror = openbsd_mirror()
-    release = args.release or openbsd_default_release(mirror)
-    arch = args.arch or openbsd_default_arch()
 
     if args.list_releases:
         print(*openbsd_mirror_releases(mirror), sep='\n')
         return
+
+    release = args.release or openbsd_default_release(mirror)
+    arch = args.arch or openbsd_default_arch()
 
     missing = [folder for folder in OPENBSD_FOLDERS
                if args.update
