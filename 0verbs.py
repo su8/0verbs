@@ -199,10 +199,7 @@ def netbsd_mirror():
 
 
 def netbsd_mirror_releases(mirror, arch):
-    try:
-        listing = fetch(f'{mirror}/{arch}/').decode('utf-8', errors='ignore')
-    except SystemExit:
-        return []
+    listing = fetch(f'{mirror}/{arch}/').decode('utf-8', errors='ignore')
     return sorted(
         re.findall(r'href="(\d+\.\d+_[^/"]+)/"', listing), key=version_order)
 
