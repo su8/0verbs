@@ -235,6 +235,15 @@ class NetBSD(Backend):
     def releases_url(self):
         return f'{self.mirror}/{self.arch}/'
 
+    def default_release(self):
+        if platform.system() == 'NetBSD':
+            # Packages only install on the same major release (10.x, 9.x)
+            major = platform.release().split('.')[0] + '.'
+            same = [r for r in self.releases() if r.startswith(major)]
+            if same:
+                return same[-1]
+        return super().default_release()
+
     def url(self, release, folder):
         return f'{self.mirror}/{self.arch}/{release}/SHA512.bz2'
 
