@@ -17,6 +17,7 @@
 # MA 02110-1301, USA.
 #
 import argparse
+import bz2
 import os
 import platform
 import re
@@ -37,8 +38,7 @@ CACHE_ROOT = os.path.join(os.path.expanduser('~'), '.cache', '0verbs')
 #            or packages-stable. installurl(5) is honoured.
 #
 # "netbsd" : mirrors publish <arch>/<release>/SHA512.bz2, a bzip2-compressed
-#            list. The raw .bz2 is kept as SHA512.bz2 and a cleaned-up
-#            (no "All/" prefix) text list is written to SHA512.
+#            list. It is saved decompressed as SHA512.
 #
 # Both formats are parsed by search(); only the download/decompress step
 # and the release discovery differ.
@@ -219,45 +219,26 @@ def netbsd_default_arch():
 
 def netbsd_download(mirror, release, arch):
     url = f'{mirror}/{arch}/{release}/SHA512.bz2'
-    raw_db = local_list('netbsd', release, arch, 'packages', 'SHA512.bz2')
-    clean_db = local_list('netbsd', release, arch, 'packages', 'SHA512')
+    db = local_list('netbsd', release, arch, 'packages', 'SHA512')
     data = fetch(url, announce=True)
     try:
-        import bz2
         text = bz2.decompress(data)
-    except ImportError:
-        import subprocess
-        proc = subprocess.run(['bzip2', '-dc'], input=data,
-                              capture_output=True, check=True)
-        text = proc.stdout
-    os.makedirs(os.path.dirname(raw_db), exist_ok=True)
-    tmp_raw = f'{raw_db}.tmp'
-    with open(tmp_raw, 'wb') as fh:
-        fh.write(data)
-    os.replace(tmp_raw, raw_db)
-    # Strip "All/" prefix from every package path, if present.
-    out_lines = []
-    for line in text.decode('utf-8', errors='replace').splitlines(True):
-        # Match e.g. "SHA512 (All/curl-8.10.1.tgz) = hash"
-        m = re.match(r'(SHA512 \()All/(.+\.tgz\) = .*)', line)
-        if m:
-            out_lines.append(m.group(1) + m.group(2) + '\n')
-        else:
-            out_lines.append(line)
-    tmp_clean = f'{clean_db}.tmp'
-    with open(tmp_clean, 'w', encoding='utf-8') as fh:
-        fh.writelines(out_lines)
-    os.replace(tmp_clean, clean_db)
-    print(f'saved raw to {raw_db}')
-    print(f'saved cleaned list to {clean_db}')
+    except (OSError, ValueError) as err:
+        sys.exit(f'ERROR: could not decompress {url}: {err}')
+    os.makedirs(os.path.dirname(db), exist_ok=True)
+    tmp = f'{db}.tmp'
+    with open(tmp, 'wb') as fh:
+        fh.write(text)
+    os.replace(tmp, db)
+    print(f'saved to {db}')
 
 
 def netbsd_parse(db_path):
-    """Yield (name, sha512) from a NetBSD SHA512 file (All/ already stripped)."""
+    """Yield (name, sha512) from a NetBSD SHA512 file."""
     try:
         with open(db_path, errors='replace') as fh:
             for line in fh:
-                m = re.search(r'SHA512 \((.+?)\.tgz\) = ([A-Fa-f0-9]+)', line)
+                m = re.search(r'SHA512 \((?:All/)?(.+?)\.tgz\) = ([A-Fa-f0-9]+)', line)
                 if m:
                     yield m.group(1), m.group(2)
     except FileNotFoundError:
@@ -412,8 +393,8 @@ def build_parser(prog):
 Package lists are saved under {CACHE_ROOT}.
 OpenBSD mirrors come from {INSTALLURL} (or {OPENBSD_DEFAULT_MIRROR}).
 NetBSD mirrors come from {NETBSD_DEFAULT_MIRROR}.
-NetBSD keeps the raw SHA512.bz2 and a cleaned SHA512 (no "All/" prefix),
-and always shows only the newest version of each package.''')
+NetBSD lists are saved decompressed as SHA512. NetBSD
+always shows only the newest version of each package.''')
 
     parser.add_argument('queries', nargs='*', metavar='package',
         help='words to search for, case-insensitive; a package must contain '
