@@ -21,6 +21,7 @@ import bz2
 import os
 import platform
 import re
+import subprocess
 import sys
 import time
 from urllib.error import HTTPError
@@ -185,6 +186,14 @@ class OpenBSD(Backend):
 
     def default_release(self):
         if platform.system() == 'OpenBSD':
+            # Like pkg_add(1): -current and -beta kernels use snapshots
+            try:
+                version = subprocess.run(['sysctl', '-n', 'kern.version'],
+                                         capture_output=True, text=True).stdout
+            except OSError:
+                version = ''
+            if re.search(r'-(current|beta)\b', version.partition('\n')[0]):
+                return 'snapshots'
             return platform.release()
         return super().default_release()
 
