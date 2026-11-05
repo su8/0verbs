@@ -463,7 +463,10 @@ always shows only the newest version of each package.''')
 
 def run(backend, args):
     if args.list_releases:
-        print(*backend.releases(), sep='\n')
+        releases = backend.releases()
+        if not releases:
+            sys.exit(f'ERROR: could not list releases at {backend.releases_url()}')
+        print(*releases, sep='\n')
         return
 
     release = args.release or backend.default_release()
