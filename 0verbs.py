@@ -428,7 +428,7 @@ always shows only the newest version of each package.''')
 # Main
 # ---------------------------------------------------------------------------
 
-def run_openbsd(args, parser):
+def run_openbsd(args):
     mirror = openbsd_mirror()
     release = args.release or openbsd_default_release(mirror)
     arch = args.arch or openbsd_default_arch()
@@ -459,7 +459,7 @@ def run_openbsd(args, parser):
         sys.exit('ERROR: Please supply some package!')
 
 
-def run_netbsd(args, parser):
+def run_netbsd(args):
     mirror = netbsd_mirror()
     arch = args.arch or netbsd_default_arch()
 
@@ -493,9 +493,9 @@ def main():
 
     target = args.os or detect_os()
     if target == 'openbsd':
-        run_openbsd(args, parser)
+        run_openbsd(args)
     else:
-        run_netbsd(args, parser)
+        run_netbsd(args)
 
 
 if __name__ == '__main__':
