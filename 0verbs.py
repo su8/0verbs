@@ -286,7 +286,9 @@ def keep_newest(matches, stem_only=False):
         php-8.4.1 and php-8.4.2 collapse.
 
     stem_only=True (NetBSD): keep the newest version per stem, so jdk-17
-        and jdk-21 collapse into one row (the newest of either).
+        and jdk-21 collapse into one row (the newest of either). pkgsrc puts
+        the branch in a stem prefix (php84-curl, py313-yaml), so those
+        collapse too and the highest prefix wins.
     """
     newest = {}
     for match in matches:
@@ -294,13 +296,20 @@ def keep_newest(matches, stem_only=False):
         if not parts:
             newest[match[0]] = ((), match)
             continue
+        branch = 0
         if stem_only:
             key = parts['stem']
+            # php84-curl -> php-curl; wget2 has no "-" after the digits, so stays
+            prefixed = re.fullmatch(r'([A-Za-z]+)(\d+)(-.+)', key)
+            if prefixed:
+                key = prefixed[1] + prefixed[3]
+                branch = int(prefixed[2])
         else:
             key = (parts['stem'], parts['flavor'],
                    version_line(parts['version']))
-        # Rank: epoch (vN) first, then version, then pN (pkgfix), then nbN
-        rank = (int(parts['v'] or 0),
+        # Rank: stem prefix, epoch (vN), version, pN (pkgfix), then nbN
+        rank = (branch,
+                int(parts['v'] or 0),
                 version_order(parts['version']),
                 int(parts['p'] or -1),
                 int(parts['nb'] or -1))

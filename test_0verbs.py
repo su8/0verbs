@@ -32,6 +32,14 @@ def test_netbsd_newest_uses_nb_revision():
     assert [x[0] for x in v.keep_newest(m, stem_only=True)] == ['curl-8.10.1nb10']
 
 
+def test_netbsd_newest_collapses_branch_prefix():
+    m = [('php56-curl-5.6.40nb28', '', ''), ('php85-curl-8.5.12nb28', '', ''),
+         ('php84-curl-8.4.27nb28', '', ''), ('py39-yaml-6.0', '', ''),
+         ('py313-yaml-6.0', '', ''), ('wget-1.25', '', ''), ('wget2-2.3.0', '', '')]
+    assert sorted(x[0] for x in v.keep_newest(m, stem_only=True)) == [
+        'php85-curl-8.5.12nb28', 'py313-yaml-6.0', 'wget-1.25', 'wget2-2.3.0']
+
+
 def test_openbsd_hash_keeps_base64_padding():
     path = _write('SHA256 (curl-8.10.1.tgz) = ab+/cd=\n')
     assert list(v.OpenBSD().parse(path)) == [('curl-8.10.1', 'ab+/cd=')]
