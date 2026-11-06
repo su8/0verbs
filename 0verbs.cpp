@@ -1476,13 +1476,19 @@ static bool is_safe_cache_path(const fs::path& p) {
     }
 
     // Only the cache directory itself, something beneath the default cache
-    // root, or a directory named "0verbs" may be deleted.
+    // root, or a directory that holds nothing but openbsd/ and netbsd/ may be
+    // deleted.  The name alone is not enough: a git clone is also "0verbs".
     fs::path def = fs::weakly_canonical(fs::path(default_cache_root()), ec);
     if (!ec) {
         fs::path rel = abs.lexically_relative(def);
         if (abs == def || (!rel.empty() && rel.begin()->string() != "..")) return true;
     }
-    return abs.filename() == "0verbs";
+    std::error_code iec;
+    for (fs::directory_iterator it(abs, iec), end; !iec && it != end; it.increment(iec)) {
+        std::string name = it->path().filename().string();
+        if (name != "openbsd" && name != "netbsd") return false;
+    }
+    return !iec;
 }
 
 static bool clean_cache() {
@@ -1493,7 +1499,7 @@ static bool clean_cache() {
     }
     if (!is_safe_cache_path(fs::path(g_cache_root))) {
         std::cerr << "ERROR: refusing to remove unsafe cache path: " << g_cache_root
-                  << "\nThe cache directory must be named 0verbs or live under "
+                  << "\nThe cache directory must hold only openbsd/ and netbsd/, or live under "
                   << default_cache_root() << "\n";
         return false;
     }
