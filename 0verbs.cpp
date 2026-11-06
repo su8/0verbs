@@ -288,10 +288,42 @@ static std::string netbsd_default_arch() {
     return normalize_arch(NETBSD_ARCH_NAMES, machine_arch());
 }
 
-static std::string detect_os() {
+static std::string host_sysname() {
     struct utsname u;
-    if (uname(&u) == 0 && std::string(u.sysname) == "OpenBSD") return "openbsd";
-    return "netbsd";
+    if (uname(&u) != 0) return "";
+    return u.sysname;
+}
+
+static std::string host_release() {
+    struct utsname u;
+    if (uname(&u) != 0) return "";
+    return u.release;
+}
+
+// "10.1" -> "10.", the prefix used to match a NetBSD release directory.
+static std::string host_major_prefix() {
+    std::string release = host_release();
+    if (release.empty()) return "";
+    return release.substr(0, release.find('.')) + ".";
+}
+
+static std::string first_line(const std::string& s) {
+    size_t nl = s.find('\n');
+    return nl == std::string::npos ? s : s.substr(0, nl);
+}
+
+static std::string sysctl_kern_version() {
+    std::string out;
+    FILE* fp = popen("sysctl -n kern.version 2>/dev/null", "r");
+    if (!fp) return out;
+    char buf[256];
+    while (std::fgets(buf, static_cast<int>(sizeof(buf)), fp) != nullptr) out += buf;
+    (void)pclose(fp);
+    return out;
+}
+
+static std::string detect_os() {
+    return host_sysname() == "OpenBSD" ? "openbsd" : "netbsd";
 }
 
 // ---------------------------------------------------------------------------
@@ -495,6 +527,16 @@ static std::string latest_cached_release(const std::string& os, const std::strin
     return releases.empty() ? "" : releases.back();
 }
 
+// Newest cached release whose name starts with a major-version prefix such
+// as "10.".  NetBSD packages only install on the same major release.
+static std::string latest_cached_major(const std::string& os, const std::string& arch,
+                                       const std::string& prefix) {
+    std::vector<std::string> releases = cached_releases(os, arch);
+    for (auto it = releases.rbegin(); it != releases.rend(); ++it)
+        if (it->rfind(prefix, 0) == 0) return *it;
+    return "";
+}
+
 // ---------------------------------------------------------------------------
 // Mirrors
 // ---------------------------------------------------------------------------
@@ -548,6 +590,24 @@ static bool openbsd_mirror_releases(const std::string& mirror, long timeout,
 }
 
 static bool openbsd_default_release(const std::string& mirror, long timeout, std::string& out) {
+    if (host_sysname() == "OpenBSD") {
+        // Like pkg_add(1): -current and -beta kernels use snapshots.  On a
+        // regular machine use the installed release, without asking the
+        // mirror first.
+        static const std::regex current_beta(R"(-(current|beta)\b)");
+        if (std::regex_search(first_line(sysctl_kern_version()), current_beta)) {
+            out = "snapshots";
+            return true;
+        }
+        std::string release = host_release();
+        if (!release.empty()) {
+            out = release;
+            return true;
+        }
+    }
+
+    // Other systems (or a machine where uname(3) had no release) use the
+    // newest release on the mirror.
     std::vector<std::string> releases;
     std::string error;
     if (!openbsd_mirror_releases(mirror, timeout, releases, error)) {
@@ -598,8 +658,24 @@ static bool netbsd_default_release(const std::string& mirror, const std::string&
         return false;
     }
 
-    // Prefer the newest non-preview release.  If only previews exist, use the
-    // newest one.
+    // Packages only install on the same major release (10.x, 9.x).  Prefer
+    // the newest release of the host's major version when running on NetBSD.
+    if (host_sysname() == "NetBSD") {
+        std::string major = host_major_prefix();
+        std::string same;
+        if (!major.empty()) {
+            for (const auto& r : releases) {
+                if (r.rfind(major, 0) == 0) same = r;
+            }
+        }
+        if (!same.empty()) {
+            out = same;
+            return true;
+        }
+    }
+
+    // Otherwise prefer the newest non-preview release.  If only previews
+    // exist, use the newest one.
     std::string chosen;
     for (const auto& r : releases) {
         if (!preview_release(r)) chosen = r;
@@ -709,8 +785,7 @@ static bool decompress_bz2(const std::string& in, std::string& out, std::string&
 static bool netbsd_download(const std::string& mirror, const std::string& release,
                             const std::string& arch, long timeout) {
     std::string url = mirror + "/" + arch + "/" + release + "/SHA512.bz2";
-    std::string raw_db = local_list("netbsd", release, arch, "packages", "SHA512.bz2");
-    std::string clean_db = local_list("netbsd", release, arch, "packages", "SHA512");
+    std::string db = local_list("netbsd", release, arch, "packages", "SHA512");
     std::string data;
     std::string error;
 
@@ -725,32 +800,13 @@ static bool netbsd_download(const std::string& mirror, const std::string& releas
         return false;
     }
 
-    if (!atomic_write(raw_db, data, error)) {
+    // Keep only the decompressed list, as the Python version does.
+    if (!atomic_write(db, text, error)) {
         std::cerr << "ERROR: " << error << "\n";
         return false;
     }
 
-    // Make a clean, line-based copy with the "All/" prefix removed.  This
-    // keeps the cheap regex parsing below independent of the compressed file.
-    std::istringstream in(text);
-    std::ostringstream out;
-    std::regex re(R"(SHA512 \((?:All/)?(.+?\.tgz)\) = (\S+))");
-    std::string line;
-    while (std::getline(in, line)) {
-        std::smatch m;
-        if (std::regex_search(line, m, re))
-            out << "SHA512 (" << m[1] << ") = " << m[2] << "\n";
-        else
-            out << line << "\n";
-    }
-
-    if (!atomic_write(clean_db, out.str(), error)) {
-        std::cerr << "ERROR: " << error << "\n";
-        return false;
-    }
-
-    std::cerr << "saved raw to " << raw_db << "\n";
-    std::cerr << "saved cleaned list to " << clean_db << "\n";
+    std::cerr << "saved to " << db << "\n";
     return true;
 }
 
@@ -867,10 +923,11 @@ static bool is_installed(const Match& m, const InstalledPackages* installed) {
     return installed->keys.count(stem_flavor_key(m.name)) != 0;
 }
 
-// Rank is (epoch, numeric-aware version, pkgfix, pkgsrc revision).
+// Rank is (stem branch, epoch, numeric-aware version, pkgfix, pkgsrc
+// revision).
 static std::vector<Match> keep_newest(const std::vector<Match>& matches,
                                       bool stem_only = false) {
-    using Rank = std::tuple<int, VersionOrder, int, int>;
+    using Rank = std::tuple<long long, int, VersionOrder, int, int>;
 
     struct Key {
         std::string stem;
@@ -891,21 +948,41 @@ static std::vector<Match> keep_newest(const std::vector<Match>& matches,
 
         if (!parts.ok) {
             Key k{match.name, "", ""};
-            if (!newest.count(k)) newest[k] = {Rank{0, VersionOrder{}, -1, -1}, match};
+            if (!newest.count(k))
+                newest[k] = {Rank{0, 0, VersionOrder{}, -1, -1}, match};
             continue;
         }
 
+        long long branch = 0;
         Key k;
         if (stem_only) {
-            // NetBSD: collapse by stem only (jdk-17 and jdk-21 become one row).
-            k = {parts.stem, "", ""};
+            // NetBSD: collapse by stem only (jdk-17 and jdk-21 become one
+            // row).  pkgsrc also puts the branch in a stem prefix
+            // (php84-curl, py313-yaml), so collapse that too; the highest
+            // branch wins.  wget2 has no "-" after the digits and stays as
+            // it is.
+            std::string stem = parts.stem;
+            static const std::regex prefixed(R"(([A-Za-z]+)(\d+)(-.+))");
+            std::smatch m;
+            if (std::regex_match(stem, m, prefixed)) {
+                try {
+                    branch = std::stoll(m[2].str());
+                } catch (const std::exception&) {
+                    branch = 0;
+                }
+                stem = m[1].str() + m[3].str();
+            }
+            k = {stem, "", ""};
         } else {
             // OpenBSD: keep php-8.3 and php-8.4 separate, but collapse
             // php-8.4.1 and php-8.4.2.
             k = {parts.stem, parts.flavor, version_line(parts.version)};
         }
 
-        Rank rank{parts.v, version_order(parts.version), parts.p, parts.nb};
+        // Python treats a missing epoch as zero; p and nb keep -1 so that
+        // p0/nb0 sort above an absent suffix.
+        int epoch = parts.v < 0 ? 0 : parts.v;
+        Rank rank{branch, epoch, version_order(parts.version), parts.p, parts.nb};
         auto it = newest.find(k);
         if (it == newest.end() || rank > it->second.first)
             newest[k] = {rank, match};
@@ -1270,7 +1347,7 @@ static void print_help(const std::string& prog) {
         "usage: " << prog << " [options] [package ...]\n\n"
         "Search OpenBSD and NetBSD package lists from a local cache.\n\n"
         "Cached lists are used when available.  The network is contacted only\n"
-        "when no cache exists or when --update is given.\n\n"
+        "when no suitable cache exists or when --update is given.\n\n"
         "positional arguments:\n"
         "  package                 words to search for, case-insensitive; a\n"
         "                          package must contain all of them. A word with\n"
@@ -1569,7 +1646,11 @@ static int run_openbsd(const Options& opt) {
 
     std::string release = opt.release;
     if (release.empty()) {
-        if (!opt.update) release = latest_cached_release("openbsd", arch);
+        // On OpenBSD the installed release (or snapshots on -current/-beta)
+        // wins without asking the mirror.  Elsewhere keep the cache-first
+        // behaviour and fall back to the newest release on the mirror.
+        if (!opt.update && host_sysname() != "OpenBSD")
+            release = latest_cached_release("openbsd", arch);
         if (release.empty() && !openbsd_default_release(mirror, opt.timeout, release))
             return 1;
     }
@@ -1668,7 +1749,18 @@ static int run_netbsd(const Options& opt) {
 
     std::string release = opt.release;
     if (release.empty()) {
-        if (!opt.update) release = latest_cached_release("netbsd", arch);
+        // On NetBSD prefer a cached release with the host's major version;
+        // anywhere else keep the cache-first behaviour.  Either way, fall
+        // back to the mirror when nothing suitable is cached.
+        if (!opt.update) {
+            if (host_sysname() == "NetBSD") {
+                std::string major = host_major_prefix();
+                if (!major.empty())
+                    release = latest_cached_major("netbsd", arch, major);
+            } else {
+                release = latest_cached_release("netbsd", arch);
+            }
+        }
         if (release.empty() && !netbsd_default_release(mirror, arch, opt.timeout, release))
             return 1;
     }

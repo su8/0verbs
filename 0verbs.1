@@ -50,9 +50,19 @@ to force literal matching for every word.
 .Pp
 Unless
 .Fl \-release
-is given, the newest cached release for the selected operating system and
-architecture is used.
-If no release is cached, the latest release is discovered on the mirror.
+is given, the release depends on the host.
+On
+.Ox
+the installed release is used, or
+.Ar snapshots
+on a -current or -beta kernel, as
+.Xr pkg_add 1
+does.
+On
+.Nx
+the newest cached release with the host's major version is used.
+Elsewhere the newest cached release is used.
+If no suitable release is cached, the release is discovered on the mirror.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -107,7 +117,7 @@ the output is a JSON array of strings.
 Refresh cached package indexes from the mirror.
 If
 .Fl \-release
-is not given, the latest release is discovered from the mirror.
+is not given, the host's default release is used, as described above.
 When used without a search word and without
 .Fl \-list-releases ,
 the indexes are refreshed and
@@ -195,6 +205,11 @@ the major and minor versions for projects with a major version below 10.
 For
 .Nx ,
 one row per package stem is shown.
+pkgsrc branch prefixes such as
+.Ar php84-curl
+and
+.Ar py313-yaml
+collapse to the highest branch.
 .It Fl \-max-age Ar days
 Warn on standard error when the cached index is older than
 .Ar days .
@@ -249,13 +264,19 @@ is used and no releases are cached.
 .Pp
 Without
 .Fl \-release ,
-the newest cached release is selected.
-If nothing is cached, the latest release is discovered from the mirror.
+.Ox
+uses its installed release
+.Pq Ar snapshots
+on -current or -beta kernels,
+.Nx
+uses the newest cached release with the host's major version, and other
+systems use the newest cached release.
+If nothing suitable is cached, the release is discovered from the mirror.
 With
 .Fl \-update
 and no
 .Fl \-release ,
-the mirror is asked for the latest release.
+the mirror is asked for the release.
 .Pp
 The first run for a release therefore requires either a network connection or a
 populated cache.
@@ -347,14 +368,10 @@ package index.
 Cached
 .Ox
 stable package index.
-.It Pa ~/.cache/0verbs/netbsd/<release>/packages/<arch>/SHA512.bz2
-Cached compressed
+.It Pa ~/.cache/0verbs/netbsd/<release>/packages/<arch>/SHA512
+Decompressed
 .Nx
 index.
-.It Pa ~/.cache/0verbs/netbsd/<release>/packages/<arch>/SHA512
-Decompressed and cleaned
-.Nx
-index used for searching.
 .It Pa /var/db/pkg
 .Ox
 package database, also checked on

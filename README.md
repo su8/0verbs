@@ -85,12 +85,12 @@ The default cache directory is `$XDG_CACHE_HOME/0verbs` or
 
 ```text
 0verbs/openbsd/<release>/<packages|packages-stable>/<arch>/SHA256
-0verbs/netbsd/<release>/packages/<arch>/SHA512.bz2
 0verbs/netbsd/<release>/packages/<arch>/SHA512
 ```
 
 `--clean` refuses to delete a directory unless it is the configured cache
-directory, lives beneath the default cache root, or is named `0verbs`.
+directory, lives beneath the default cache root, or holds nothing but
+`openbsd/` and `netbsd/`.
 
 ## JSON output
 
