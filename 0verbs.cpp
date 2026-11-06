@@ -488,6 +488,10 @@ static std::vector<std::string> cached_releases(const std::string& os, const std
 
 static std::string latest_cached_release(const std::string& os, const std::string& arch) {
     std::vector<std::string> releases = cached_releases(os, arch);
+    // "snapshots" sorts after every number, but it is only wanted when asked
+    // for with --release or when it is all that is cached.
+    for (auto it = releases.rbegin(); it != releases.rend(); ++it)
+        if (*it != "snapshots") return *it;
     return releases.empty() ? "" : releases.back();
 }
 
@@ -920,11 +924,26 @@ static std::vector<Match> hide_superseded(const std::vector<Match>& matches) {
         return parts.stem + "\x01" + parts.flavor + "\x01" + version_line(parts.version);
     };
 
-    std::set<std::string> updated;
+    auto package_key = [](const std::string& name) -> std::optional<std::string> {
+        PackageParts parts = parse_package(name);
+        if (!parts.ok) return std::nullopt;
+        return parts.stem + "\x01" + parts.flavor;
+    };
+
+    // Most packages have one version per release, and any stable update
+    // replaces it (curl-8.16.0 -> curl-8.19.0, a different version_line).
+    // Only packages with several branches in the release (php-8.3, php-8.4)
+    // are matched per version_line.
+    std::set<std::string> updated, updated_package;
+    std::map<std::string, std::set<std::string>> release_lines;
     for (const auto& m : matches) {
+        auto k = line_key(m.name);
+        if (!k) continue;
         if (!m.label.empty()) {
-            auto k = line_key(m.name);
-            if (k) updated.insert(*k);
+            updated.insert(*k);
+            updated_package.insert(*package_key(m.name));
+        } else {
+            release_lines[*package_key(m.name)].insert(*k);
         }
     }
 
@@ -935,7 +954,14 @@ static std::vector<Match> hide_superseded(const std::vector<Match>& matches) {
             continue;
         }
         auto k = line_key(m.name);
-        if (!k || !updated.count(*k)) out.push_back(m);
+        if (!k) {
+            out.push_back(m);
+            continue;
+        }
+        std::string pk = *package_key(m.name);
+        bool superseded = release_lines[pk].size() > 1 ? updated.count(*k) != 0
+                                                       : updated_package.count(pk) != 0;
+        if (!superseded) out.push_back(m);
     }
     return out;
 }
@@ -1476,13 +1502,19 @@ static bool is_safe_cache_path(const fs::path& p) {
     }
 
     // Only the cache directory itself, something beneath the default cache
-    // root, or a directory named "0verbs" may be deleted.
+    // root, or a directory that holds nothing but openbsd/ and netbsd/ may be
+    // deleted.  The name alone is not enough: a git clone is also "0verbs".
     fs::path def = fs::weakly_canonical(fs::path(default_cache_root()), ec);
     if (!ec) {
         fs::path rel = abs.lexically_relative(def);
         if (abs == def || (!rel.empty() && rel.begin()->string() != "..")) return true;
     }
-    return abs.filename() == "0verbs";
+    std::error_code iec;
+    for (fs::directory_iterator it(abs, iec), end; !iec && it != end; it.increment(iec)) {
+        std::string name = it->path().filename().string();
+        if (name != "openbsd" && name != "netbsd") return false;
+    }
+    return !iec;
 }
 
 static bool clean_cache() {
@@ -1493,7 +1525,7 @@ static bool clean_cache() {
     }
     if (!is_safe_cache_path(fs::path(g_cache_root))) {
         std::cerr << "ERROR: refusing to remove unsafe cache path: " << g_cache_root
-                  << "\nThe cache directory must be named 0verbs or live under "
+                  << "\nThe cache directory must hold only openbsd/ and netbsd/, or live under "
                   << default_cache_root() << "\n";
         return false;
     }

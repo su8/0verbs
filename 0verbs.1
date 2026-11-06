@@ -141,8 +141,11 @@ is expanded to the home directory.
 Trailing slashes are removed.
 .It Fl \-clean
 Remove the cache directory and exit.
-For safety, the directory must live beneath the default cache root or be named
-.Ql 0verbs .
+For safety, the directory must live beneath the default cache root or hold
+nothing but
+.Pa openbsd
+and
+.Pa netbsd .
 .It Fl \-sha256 , Fl \-sha512
 Show each package's digest in text output.
 The digest type is determined by the backend: SHA256 for
