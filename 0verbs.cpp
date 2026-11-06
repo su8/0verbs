@@ -924,11 +924,26 @@ static std::vector<Match> hide_superseded(const std::vector<Match>& matches) {
         return parts.stem + "\x01" + parts.flavor + "\x01" + version_line(parts.version);
     };
 
-    std::set<std::string> updated;
+    auto package_key = [](const std::string& name) -> std::optional<std::string> {
+        PackageParts parts = parse_package(name);
+        if (!parts.ok) return std::nullopt;
+        return parts.stem + "\x01" + parts.flavor;
+    };
+
+    // Most packages have one version per release, and any stable update
+    // replaces it (curl-8.16.0 -> curl-8.19.0, a different version_line).
+    // Only packages with several branches in the release (php-8.3, php-8.4)
+    // are matched per version_line.
+    std::set<std::string> updated, updated_package;
+    std::map<std::string, std::set<std::string>> release_lines;
     for (const auto& m : matches) {
+        auto k = line_key(m.name);
+        if (!k) continue;
         if (!m.label.empty()) {
-            auto k = line_key(m.name);
-            if (k) updated.insert(*k);
+            updated.insert(*k);
+            updated_package.insert(*package_key(m.name));
+        } else {
+            release_lines[*package_key(m.name)].insert(*k);
         }
     }
 
@@ -939,7 +954,14 @@ static std::vector<Match> hide_superseded(const std::vector<Match>& matches) {
             continue;
         }
         auto k = line_key(m.name);
-        if (!k || !updated.count(*k)) out.push_back(m);
+        if (!k) {
+            out.push_back(m);
+            continue;
+        }
+        std::string pk = *package_key(m.name);
+        bool superseded = release_lines[pk].size() > 1 ? updated.count(*k) != 0
+                                                       : updated_package.count(pk) != 0;
+        if (!superseded) out.push_back(m);
     }
     return out;
 }
