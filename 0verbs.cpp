@@ -488,6 +488,10 @@ static std::vector<std::string> cached_releases(const std::string& os, const std
 
 static std::string latest_cached_release(const std::string& os, const std::string& arch) {
     std::vector<std::string> releases = cached_releases(os, arch);
+    // "snapshots" sorts after every number, but it is only wanted when asked
+    // for with --release or when it is all that is cached.
+    for (auto it = releases.rbegin(); it != releases.rend(); ++it)
+        if (*it != "snapshots") return *it;
     return releases.empty() ? "" : releases.back();
 }
 
